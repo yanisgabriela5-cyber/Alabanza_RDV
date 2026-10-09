@@ -25,6 +25,7 @@ Costo: **$0** (GitHub Pages + plan gratis de Supabase).
 ## Base de datos (scripts en `supabase/`, se ejecutan en SQL Editor)
 1. `schema.sql` ✅ ejecutado: profiles, publicaciones, comentarios, reacciones, canciones, notas_cancion, tonos_cantante, setlists, setlist_items, bucket `media`.
 2. `002_agenda.sql` ⏳ **confirmar si se ejecutó**: tipos_evento, asignaciones, en_vivo, columnas `tipo_evento_id` y `ensayo_fecha` en setlists, `setlist_id` y tipo `programa` en publicaciones.
+3. `003_partituras.sql` ⏳ **confirmar si se ejecutó**: tabla partituras + bucket `partituras`.
 
 Ambos scripts se pueden volver a ejecutar sin borrar datos.
 
@@ -51,10 +52,14 @@ Ambos scripts se pueden volver a ejecutar sin borrar datos.
    - **Equipo del día:** cantores e instrumentistas; cada uno confirma ✅ / ❌.
    - **Publicar en el muro** y **compartir por WhatsApp.**
 4. **Modo en vivo:** un admin inicia desde el día y, al cambiar de canción, a todos les cambia la pantalla en el tono asignado. Cada uno ve arriba la nota general y la de su instrumento. Se puede pasar a modo "Libre".
-5. **Equipo:** integrantes por instrumento; aprobar, nombrar admin, desactivar.
+5. **Editor de acordes:** botonera con los acordes del tono y modo "Tocar acordes" (tocar palabra → tocar acorde), sin escribir corchetes.
+6. **Partituras:** fotos/PDF/links por canción e instrumento (pensado para batería); filtro "Con partitura"; botón "Ver mi partitura" en la canción y en vivo.
+7. **Sin internet:** copia local de todo lo consultado + botón "Descargar para usar sin internet" en Mi perfil. Sin señal solo lectura.
+8. **Equipo:** integrantes por instrumento; aprobar, nombrar admin, desactivar.
 
 ## Pendientes / próximos pasos
-- [ ] Confirmar que se ejecutó `002_agenda.sql`.
+- [ ] Confirmar que se ejecutaron `002_agenda.sql` y `003_partituras.sql`.
+- [ ] Desactivar "Confirm email" en Supabase (Authentication → Sign In / Providers → Email) por el límite de correos.
 - [ ] Configurar en Supabase → Authentication → URL Configuration: Site URL y Redirect URL = `https://yanisgabriela5-cyber.github.io/Alabanza_RDV/`
 - [ ] Definir el día y la hora de ensayo del Servicio dominical en ⚙️ Tipos y horarios.
 - [ ] Rotar la secret key de Supabase (quedó expuesta en el chat original).

@@ -286,3 +286,38 @@ table.plan { border-collapse: collapse; font-size: 13px; min-width: 100%; }
 .chip.vivo.activo { background: rgba(239, 107, 107, .15); }
 .set-item.en-vivo { border-color: var(--peligro); }
 .nota-mia { padding: 10px 12px; font-size: 15px; border-color: rgba(107, 168, 239, .45); white-space: pre-wrap; }
+
+/* ---------- sin conexión ---------- */
+.offline { position: sticky; top: 0; z-index: 20; background: #3a2f12; color: var(--acento-2); text-align: center; font-size: 13px; font-weight: 600; padding: calc(6px + var(--safe-t)) 12px 6px; }
+
+/* ---------- editor de acordes ---------- */
+.ea-teclas { display: grid; gap: 6px; margin-bottom: 8px; }
+.ea-fila { display: flex; gap: 6px; overflow-x: auto; align-items: center; padding-bottom: 2px; scrollbar-width: none; }
+.ea-fila::-webkit-scrollbar { display: none; }
+.ea-fila small { color: var(--texto-3); font-size: 11px; white-space: nowrap; font-weight: 700; }
+.ea-k { flex: none; min-width: 44px; height: 38px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--acento); background: rgba(224, 180, 88, .14); color: var(--acento-2); font: inherit; font-weight: 800; font-size: 15px; cursor: pointer; }
+.ea-k.sec { border-color: var(--linea); background: var(--bg-2); color: var(--texto); font-weight: 700; font-size: 14px; }
+.ea-k.peligro { border-color: var(--peligro); color: var(--peligro); background: transparent; }
+.ea-k:active { transform: scale(.95); }
+.ea-tocar { background: var(--bg-2); border: 1px solid var(--linea); border-radius: 10px; padding: 12px; max-height: 50dvh; overflow-y: auto; font-size: 17px; line-height: 2.1; }
+.ea-l { display: flex; flex-wrap: wrap; align-items: baseline; }
+.ea-w { cursor: pointer; border-radius: 5px; padding: 0 1px; }
+.ea-w.sel { background: rgba(107, 168, 239, .25); outline: 1px solid var(--info); }
+.ea-fin { color: var(--texto-3); padding: 0 6px; }
+.ea-ch { border: 0; background: var(--acento); color: var(--acento-txt); font: inherit; font-size: 13px; font-weight: 800; border-radius: 6px; padding: 1px 6px; margin: 0 2px; cursor: pointer; line-height: 1.5; }
+.ea-ch.sel { background: var(--info); color: #fff; }
+.caret { display: inline-block; width: 2px; height: 1.1em; background: var(--info); vertical-align: middle; margin: 0 1px; animation: pulso 1s infinite; }
+
+/* ---------- partituras ---------- */
+.partituras { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.part-item { background: var(--card); border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+.part-item img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; background: #fff; cursor: zoom-in; display: block; }
+.part-doc { aspect-ratio: 3 / 4; border: 0; background: var(--bg-2); color: var(--texto); font: inherit; font-size: 18px; font-weight: 700; cursor: pointer; }
+.part-info { padding: 8px 10px; font-size: 13px; }
+.part-info b { display: block; }
+.part-info small { color: var(--texto-3); }
+.part-item .x { position: absolute; top: 6px; right: 6px; background: rgba(0, 0, 0, .55); border: 0; border-radius: 8px; padding: 4px 6px; cursor: pointer; }
+.visor-part { background: #fff; min-height: 60dvh; }
+.visor-part img { display: block; width: 100%; height: auto; border-bottom: 2px solid #ddd; }
+.visor-part .btn { margin: 10px; width: calc(100% - 20px); }
+.visor-cerrar { position: sticky; top: 8px; float: right; margin: 8px; z-index: 2; width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(0, 0, 0, .65); color: #fff; font-size: 24px; cursor: pointer; }

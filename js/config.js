@@ -35,3 +35,5 @@ export const ROLES = {
   otro: 'Otro',
 };
 export const ROLES_CANTO = ['dirige', 'voz', 'coros'];
+
+export const ICON_INSTR = { general: '📄', voz: '🎤', coros: '🎤', piano: '🎹', guitarra: '🎸', guitarra_electrica: '🎸', bajo: '🎸', bateria: '🥁', otro: '🎵' };

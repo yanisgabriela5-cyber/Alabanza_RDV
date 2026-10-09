@@ -6,7 +6,7 @@ App web instalable (PWA) para el equipo de alabanza: muro, canciones con acordes
 - **Backend:** Supabase (login, base de datos, imágenes, tiempo real).
 
 ## Puesta en marcha
-1. **Base de datos:** Supabase → SQL Editor → pegar `supabase/schema.sql` → Run. Luego, en otra query, `supabase/002_agenda.sql` → Run.
+1. **Base de datos:** Supabase → SQL Editor → pegar `supabase/schema.sql` → Run. Luego, cada uno en su propia query y en orden: `supabase/002_agenda.sql` y `supabase/003_partituras.sql` → Run.
 2. **GitHub Pages:** Settings → Pages → Source: *Deploy from a branch* → `main` / `(root)`.
 3. **URLs en Supabase:** Authentication → URL Configuration
    - *Site URL:* la URL de GitHub Pages (ej. `https://usuario.github.io/app-banda/`)
@@ -32,6 +32,8 @@ App web instalable (PWA) para el equipo de alabanza: muro, canciones con acordes
 | Aprobar usuarios y asignar admins | — | — | ✅ |
 
 ## Letras con acordes
+- **Botonera de acordes:** en el editor aparecen los acordes del tono; se tocan para insertarlos donde está el cursor.
+- **Modo "Tocar acordes":** se toca la palabra y luego el acorde (‹ › lo mueve dentro de la palabra; tocar un acorde permite cambiarlo o quitarlo).
 - Formato recomendado: acorde entre corchetes antes de la sílaba → `[G]Cuan grande es [D]Él`
 - También acepta acordes en la línea de arriba (formato clásico copiado de internet).
 - Una línea que termina en `:` (`Coro:`) se muestra como sección.
@@ -46,3 +48,7 @@ App web instalable (PWA) para el equipo de alabanza: muro, canciones con acordes
 - **Confirmación**: cada integrante asignado marca ✅ Puedo / ❌ No puedo.
 - **Publicar en el muro**: publica el resumen del día (se actualiza solo si cambia).
 - **En vivo**: un admin inicia y cambia de canción; a todos les cambia la pantalla, en el tono asignado y con la nota de su instrumento.
+
+## Partituras y uso sin internet
+- **Partituras:** en cada canción, fotos (varias páginas) o PDF o link, etiquetadas por instrumento. Las sube cualquier integrante; borra quien la subió o un admin. Bucket `partituras` (15 MB).
+- **Sin internet:** todo lo que se abre queda guardado en el celular (IndexedDB). En *Mi perfil → Descargar para usar sin internet* se baja todo el repertorio, la agenda próxima y las partituras. Sin señal se puede ver, no publicar.

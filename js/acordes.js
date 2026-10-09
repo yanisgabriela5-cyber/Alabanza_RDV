@@ -180,3 +180,48 @@ export function primerAcorde(texto) {
   }
   return null;
 }
+
+/** Acordes sugeridos para un tono: los del grado (diatónicos) y algunos comunes en alabanza. */
+export function acordesDelTono(tono) {
+  const t = parseTono(tono);
+  if (!t) return { diatonicos: [], extras: [] };
+  const bem = usaBemoles(t);
+  const n = s => nombreNota(t.idx + s, bem);
+  if (!t.menor) {
+    const diatonicos = [n(0), n(2) + 'm', n(4) + 'm', n(5), n(7), n(9) + 'm', n(11) + 'dim'];
+    const extras = [`${n(0)}/${n(4)}`, `${n(7)}/${n(11)}`, `${n(7)}sus4`, `${n(0)}sus4`, `${n(5)}maj7`, `${n(0)}2`, `${n(9)}m7`, nombreNota(t.idx + 10, true), `${n(5)}/${n(9)}`, `${n(4)}`];
+    return { diatonicos, extras };
+  }
+  const diatonicos = [n(0) + 'm', n(2) + 'dim', n(3), n(5) + 'm', n(7) + 'm', n(8), n(10)];
+  const extras = [n(7), `${n(7)}7`, `${n(0)}m7`, `${n(3)}/${n(7)}`, `${n(10)}/${n(2)}`, `${n(5)}m7`, `${n(0)}sus4`];
+  return { diatonicos, extras };
+}
+
+/**
+ * Convierte el formato "acordes en la línea de arriba" al formato con corchetes,
+ * respetando la columna donde está cada acorde.
+ */
+export function aCorchetes(texto) {
+  const lineas = String(texto || '').replace(/\r/g, '').split('\n');
+  const out = [];
+  for (let i = 0; i < lineas.length; i++) {
+    const l = lineas[i];
+    if (!esLineaDeAcordes(l)) { out.push(l); continue; }
+    const acordes = [];
+    const re = /\S+/g; let m;
+    while ((m = re.exec(l))) acordes.push({ col: m.index, ch: m[0] });
+    const sig = lineas[i + 1];
+    const esLetra = sig !== undefined && sig.trim() && !esLineaDeAcordes(sig) && etiquetaSeccion(sig) === null;
+    if (!esLetra) { out.push(acordes.map(a => (esAcorde(a.ch) ? `[${a.ch}]` : a.ch)).join(' ')); continue; }
+    let letra = sig;
+    const largo = Math.max(...acordes.map(a => a.col));
+    if (letra.length < largo) letra = letra.padEnd(largo, ' ');
+    for (const a of [...acordes].reverse()) {
+      const tok = esAcorde(a.ch) ? `[${a.ch}]` : '';
+      letra = letra.slice(0, a.col) + tok + letra.slice(a.col);
+    }
+    out.push(letra.replace(/\s+$/, ''));
+    i++;
+  }
+  return out.join('\n');
+}

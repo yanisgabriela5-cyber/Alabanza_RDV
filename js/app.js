@@ -1,8 +1,8 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
-import { SUPABASE_URL, SUPABASE_KEY, APP_NOMBRE, INSTRUMENTOS, NOTAS_TABS, REACCIONES, ROLES, ROLES_CANTO } from './config.js';
+import { SUPABASE_URL, SUPABASE_KEY, APP_NOMBRE, INSTRUMENTOS, NOTAS_TABS, REACCIONES, ROLES, ROLES_CANTO, ICON_INSTR } from './config.js';
 import {
   TONOS_MAYORES, TONOS_MENORES, TODOS_LOS_TONOS, parseTono, usaBemoles, distancia,
-  transponerTono, renderLetra, primerAcorde, cifrado,
+  transponerTono, renderLetra, primerAcorde, cifrado, esAcorde, acordesDelTono, aCorchetes,
 } from './acordes.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -62,6 +62,53 @@ function fallo(e, contexto = 'Error') {
   else if (/Failed to fetch|NetworkError|network/i.test(m)) txt = 'Sin conexión. Revisa tu internet.';
   else if (/duplicate key/i.test(m)) txt = 'Ese registro ya existe.';
   toast(`${contexto}: ${txt}`, true);
+}
+
+// ---------- sin conexión: copia local de lo consultado ----------
+const idb = (() => {
+  let dbp;
+  const abrir = () => (dbp ??= new Promise((res, rej) => {
+    const r = indexedDB.open('alabanza', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('datos');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  const tx = async (modo, fn) => {
+    const db = await abrir();
+    return new Promise((res, rej) => {
+      const t = db.transaction('datos', modo);
+      const req = fn(t.objectStore('datos'));
+      t.oncomplete = () => res(req?.result);
+      t.onerror = () => rej(t.error);
+    });
+  };
+  return {
+    get: k => tx('readonly', s => s.get(k)).catch(() => undefined),
+    set: (k, v) => tx('readwrite', s => s.put(v, k)).catch(() => {}),
+    limpiar: () => tx('readwrite', s => s.clear()).catch(() => {}),
+  };
+})();
+
+const esErrorRed = e => !navigator.onLine || /failed to fetch|networkerror|network request|load failed|fetch/i.test(e?.message || '');
+
+function avisoOffline(on) {
+  const b = $('#offline');
+  if (b) b.hidden = !on;
+}
+window.addEventListener('offline', () => avisoOffline(true));
+window.addEventListener('online', () => { avisoOffline(false); if (st.perfil?.estado === 'aprobado') rutear(); });
+
+/** Ejecuta una consulta; si no hay internet devuelve la última copia guardada. */
+async function conCache(clave, consulta) {
+  const k = `${st.uid}:${clave}`;
+  let r;
+  try { r = await consulta; } catch (e) { r = { data: null, error: e }; }
+  if (!r.error) { idb.set(k, r.data ?? null); return r; }
+  if (esErrorRed(r.error)) {
+    const v = await idb.get(k);
+    if (v !== undefined) { avisoOffline(true); return { data: v, error: null, offline: true }; }
+  }
+  return r;
 }
 
 const hoy = new Date();
@@ -153,7 +200,7 @@ async function arrancar(session) {
     $('#nav').hidden = true;
     return vistaAuth();
   }
-  let { data: perfil, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle();
+  let { data: perfil, error } = await conCache('perfil', sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle());
   if (!perfil && !error) {
     await new Promise(r => setTimeout(r, 1200));
     ({ data: perfil, error } = await sb.from('profiles').select('*').eq('id', session.user.id).maybeSingle());
@@ -168,7 +215,7 @@ async function arrancar(session) {
 }
 
 async function cargarPerfiles() {
-  const { data, error } = await sb.from('profiles').select('*').order('nombre');
+  const { data, error } = await conCache('perfiles', sb.from('profiles').select('*').order('nombre'));
   if (error) return fallo(error, 'Perfiles');
   st.perfiles = new Map(data.map(p => [p.id, p]));
   if (st.perfiles.has(st.uid)) st.perfil = st.perfiles.get(st.uid);
@@ -306,10 +353,10 @@ async function vistaMuro(ctx) {
   const render = async () => {
     const SEL_PROG = ', setlist:setlists(id, titulo, fecha, ensayo_fecha, lugar, tipo, tipo_evento_id, asignaciones(perfil_id, rol, estado), setlist_items(orden, tono, cantante_id, cancion:canciones(titulo, tono_original)))';
     const [{ data, error }, pend, rv] = await Promise.all([
-      sb.from('publicaciones')
+      conCache('muro', sb.from('publicaciones')
         .select('*, comentarios(id, contenido, created_at, autor_id), reacciones(emoji, usuario_id)' + (st.faltaV2 ? '' : SEL_PROG))
         .order('fijada', { ascending: false }).order('created_at', { ascending: false })
-        .range(0, st.muroLimite - 1),
+        .range(0, st.muroLimite - 1)),
       misPendientes(),
       st.faltaV2 ? Promise.resolve({ data: [] }) : sb.from('en_vivo').select('indice, setlist:setlists(id, titulo, tipo, tipo_evento_id)').eq('activo', true),
     ]);
@@ -463,15 +510,15 @@ function rutaMedia(url) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-async function comprimirImagen(file) {
+async function comprimirImagen(file, max = 1600, calidad = 0.85) {
   if (file.type === 'image/gif') return file;
   try {
     const bmp = await createImageBitmap(file);
-    const max = 1600, r = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const r = Math.min(1, max / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas');
     c.width = Math.round(bmp.width * r); c.height = Math.round(bmp.height * r);
     c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.85));
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', calidad));
     return blob && blob.size < file.size ? blob : file;
   } catch { return file; }
 }
@@ -555,26 +602,37 @@ function modalPost(post, alGuardar) {
 // =====================================================================
 async function vistaCanciones(ctx) {
   cargando('Canciones');
-  const { data, error } = await sb.from('canciones').select('id, titulo, artista, tono_original').order('titulo');
+  const [{ data, error }, rpart] = await Promise.all([
+    conCache('canciones', sb.from('canciones').select('id, titulo, artista, tono_original').order('titulo')),
+    conCache('partituras-idx', sb.from('partituras').select('cancion_id, instrumento')),
+  ]);
   if (!ctx.vigente()) return;
   if (error) return fallo(error, 'Canciones');
   const filtro = ctx.q.get('b') || '';
+  const partes = {};   // cancion_id -> Set(instrumentos con partitura)
+  (rpart.data || []).forEach(p => (partes[p.cancion_id] ??= new Set()).add(p.instrumento));
+  let soloPart = false;
   app.innerHTML = encabezado('Canciones', { sub: `${data.length} en el repertorio` }) + `
     <div class="buscador"><input id="busca" type="search" placeholder="Buscar por título o artista" value="${esc(filtro)}"></div>
+    <div class="segmentado" id="segPart"><button data-p="0" class="activo">Todas</button><button data-p="1">📄 Con partitura</button></div>
     <div class="lista" id="lista"></div>
     ${esAdmin() ? `<button class="fab" data-acc="nueva" aria-label="Nueva canción">+</button>` : ''}`;
   const pintar = () => {
     const q = normalizar($('#busca').value);
-    const res = data.filter(c => !q || normalizar(c.titulo + ' ' + (c.artista || '')).includes(q));
+    const res = data.filter(c => (!q || normalizar(c.titulo + ' ' + (c.artista || '')).includes(q)) && (!soloPart || partes[c.id]));
     $('#lista').innerHTML = res.map(c => `
       <a class="item" href="#/cancion/${c.id}">
-        <div class="info"><b>${esc(c.titulo)}</b><small>${esc(c.artista || 'Sin artista')}</small></div>
+        <div class="info"><b>${esc(c.titulo)}</b><small>${esc(c.artista || 'Sin artista')}${partes[c.id] ? ' · 📄 ' + [...partes[c.id]].map(i => ICON_INSTR[i] || '📄').join('') : ''}</small></div>
         <span class="tono-pill">${esc(tonoTxt(c.tono_original))}</span>
       </a>`).join('') || `<div class="vacio"><span class="grande">🎵</span>${data.length ? 'Sin resultados.' : 'Aún no hay canciones.'}${!data.length && esAdmin() ? '<br>Toca <b>+</b> para agregar la primera.' : ''}</div>`;
   };
   pintar();
   app.oninput = e => { if (e.target.id === 'busca') { pintar(); history.replaceState(null, '', '#/canciones' + (e.target.value ? '?b=' + encodeURIComponent(e.target.value) : '')); } };
-  app.onclick = e => { if (e.target.closest('[data-acc=nueva]')) modalCancion(null); };
+  app.onclick = e => {
+    if (e.target.closest('[data-acc=nueva]')) return modalCancion(null);
+    const b = e.target.closest('[data-p]');
+    if (b) { soloPart = b.dataset.p === '1'; $('#segPart').querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b)); pintar(); }
+  };
 }
 
 function modalCancion(c) {
@@ -589,20 +647,147 @@ function modalCancion(c) {
         <div><label>Compás</label><input name="compas" maxlength="10" placeholder="4/4" value="${esc(x.compas)}"></div>
       </div>
       <label>Letra con acordes</label>
-      <textarea class="letra" name="letra" spellcheck="false" placeholder="Intro:
-[G] [D] [Em] [C]
-
-Verso 1:
-[G]Cuan grande es [D]Él…
+      <div class="segmentado" id="eaModos">
+        <button type="button" data-modo="texto" class="activo">✏️ Escribir</button>
+        <button type="button" data-modo="tocar">👆 Tocar acordes</button>
+      </div>
+      <div class="ea-teclas" id="eaTeclas"></div>
+      <textarea class="letra" name="letra" spellcheck="false" placeholder="Escribe o pega la letra aquí.
 
 Coro:
-…">${esc(x.letra)}</textarea>
-      <p class="ayuda">Escribe los acordes entre corchetes justo antes de la sílaba: <b>[G]Cuan grande</b>. También puedes pegar el formato con acordes en la línea de arriba. Una línea que termina en <b>:</b> (ej. <b>Coro:</b>) se muestra como sección.</p>
+Cuan grande es Él…">${esc(x.letra)}</textarea>
+      <div class="ea-tocar letra" id="eaTocar" hidden></div>
+      <p class="ayuda" id="eaAyuda"></p>
       <label>Video de referencia (YouTube)</label>
       <input name="video_url" type="url" inputmode="url" value="${esc(x.video_url)}" placeholder="https://youtu.be/…">
       <button class="btn prim blk" type="submit">${c ? 'Guardar cambios' : 'Crear canción'}</button>
     </form>`);
   const form = $('#fCan', body);
+  const ta = form.letra;
+  const zona = $('#eaTocar', body);
+  let modo = 'texto';
+  let sel = null;            // { pos } | { ini, fin } (acorde seleccionado)
+  let cursor = ta.value.length;
+  ['click', 'keyup', 'input', 'select'].forEach(ev => ta.addEventListener(ev, () => (cursor = ta.selectionStart)));
+
+  const tonoBase = () => form.tono_original.value || primerAcorde(ta.value) || 'G';
+  const ayuda = () => {
+    $('#eaAyuda', body).innerHTML = modo === 'texto'
+      ? 'Pon el cursor donde va el acorde y toca un botón de arriba. También puedes pegar canciones con los acordes en la línea de arriba. Una línea que termina en <b>:</b> (ej. <b>Coro:</b>) se muestra como sección.'
+      : sel?.ini !== undefined ? 'Acorde seleccionado: toca otro botón para cambiarlo o 🗑 para quitarlo.'
+      : sel ? 'Ahora toca el acorde. Usa ‹ › para moverlo dentro de la palabra.'
+      : 'Toca la palabra donde cambia el acorde y luego el acorde.';
+  };
+
+  const pintarTeclas = () => {
+    const t = tonoBase();
+    const { diatonicos, extras } = acordesDelTono(t);
+    const btn = (ch, cls = '') => `<button type="button" class="ea-k ${cls}" data-ch="${esc(ch)}">${esc(cifrado(ch, ajustes.latino))}</button>`;
+    $('#eaTeclas', body).innerHTML = `
+      <div class="ea-fila"><small>Tono ${esc(tonoTxt(t))}</small>${diatonicos.map(ch => btn(ch)).join('')}</div>
+      <div class="ea-fila">${extras.map(ch => btn(ch, 'sec')).join('')}
+        <button type="button" class="ea-k sec" data-otro>Otro…</button>
+        ${modo === 'tocar' && sel?.ini !== undefined ? '<button type="button" class="ea-k peligro" data-quitar>🗑 Quitar</button>' : ''}
+        ${modo === 'tocar' && sel?.pos !== undefined ? '<button type="button" class="ea-k sec" data-mover="-1">‹</button><button type="button" class="ea-k sec" data-mover="1">›</button>' : ''}
+      </div>`;
+  };
+
+  // ---- Modo tocar: la letra se muestra con palabras y acordes tocables ----
+  const pintarZona = () => {
+    const txt = ta.value;
+    let html = '', base = 0;
+    for (const linea of txt.split('\n')) {
+      if (!linea.trim()) { html += '<div class="l-vacia"></div>'; base += linea.length + 1; continue; }
+      let fila = '';
+      const re = /\[[^\]]*\]|[^\s[]+|\s+/g; let m;
+      while ((m = re.exec(linea))) {
+        const ini = base + m.index, fin = ini + m[0].length, tok = m[0];
+        if (tok[0] === '[') {
+          const marcado = sel?.ini === ini ? ' sel' : '';
+          fila += `<button type="button" class="ea-ch${marcado}" data-ini="${ini}" data-fin="${fin}">${esc(cifrado(tok.slice(1, -1), ajustes.latino))}</button>`;
+        } else if (/^\s+$/.test(tok)) {
+          fila += tok.replace(/ /g, '&nbsp;');
+        } else if (sel?.pos !== undefined && sel.pos >= ini && sel.pos < fin) {
+          const k = sel.pos - ini;
+          fila += `<span class="ea-w sel" data-pos="${ini}">${esc(tok.slice(0, k))}<i class="caret"></i>${esc(tok.slice(k))}</span>`;
+        } else {
+          fila += `<span class="ea-w" data-pos="${ini}">${esc(tok)}</span>`;
+        }
+      }
+      const finLinea = base + linea.length;
+      fila += `<span class="ea-w ea-fin ${sel?.pos === finLinea ? 'sel' : ''}" data-pos="${finLinea}" title="Final de la línea">${sel?.pos === finLinea ? '<i class="caret"></i>' : ''}·</span>`;
+      html += `<div class="ea-l">${fila}</div>`;
+      base += linea.length + 1;
+    }
+    zona.innerHTML = html || '<p class="ayuda">Primero escribe o pega la letra en "Escribir".</p>';
+  };
+
+  const refrescar = () => { pintarTeclas(); if (modo === 'tocar') pintarZona(); ayuda(); };
+
+  const insertar = ch => {
+    const v = ta.value;
+    if (modo === 'texto') {
+      const p = Math.min(cursor, v.length);
+      ta.value = v.slice(0, p) + `[${ch}]` + v.slice(p);
+      cursor = p + ch.length + 2;
+      if (!matchMedia('(pointer: coarse)').matches) { ta.focus(); ta.setSelectionRange(cursor, cursor); }
+      return;
+    }
+    if (!sel) return toast('Primero toca la palabra donde va el acorde');
+    if (sel.ini !== undefined) ta.value = v.slice(0, sel.ini) + `[${ch}]` + v.slice(sel.fin);
+    else ta.value = v.slice(0, sel.pos) + `[${ch}]` + v.slice(sel.pos);
+    sel = null;
+    refrescar();
+  };
+
+  $('#eaModos', body).onclick = e => {
+    const b = e.target.closest('[data-modo]');
+    if (!b) return;
+    modo = b.dataset.modo; sel = null;
+    body.querySelectorAll('[data-modo]').forEach(x => x.classList.toggle('activo', x === b));
+    if (modo === 'tocar') {
+      const conv = aCorchetes(ta.value);
+      if (conv !== ta.value) { ta.value = conv; toast('Acomodé los acordes de la línea de arriba dentro de la letra'); }
+    }
+    ta.hidden = modo === 'tocar';
+    zona.hidden = modo !== 'tocar';
+    refrescar();
+  };
+  $('#eaTeclas', body).onmousedown = e => e.preventDefault();   // no quitar el foco del texto
+  $('#eaTeclas', body).onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.ch) insertar(b.dataset.ch);
+    else if (b.hasAttribute('data-otro')) {
+      const ch = (prompt('Escribe el acorde (ej: C#m7, G/B, Dsus4):') || '').trim();
+      if (!ch) return;
+      if (!esAcorde(ch)) return toast('Ese acorde no lo reconozco', true);
+      insertar(ch);
+    } else if (b.hasAttribute('data-quitar') && sel?.ini !== undefined) {
+      ta.value = ta.value.slice(0, sel.ini) + ta.value.slice(sel.fin);
+      sel = null; refrescar();
+    } else if (b.dataset.mover && sel?.pos !== undefined) {
+      const v = ta.value, paso = +b.dataset.mover;
+      let nuevo = sel.pos + paso;
+      // saltar por encima de un acorde completo
+      if (paso > 0 && v[sel.pos] === '[') nuevo = v.indexOf(']', sel.pos) + 1;
+      if (paso < 0 && v[nuevo] === ']') nuevo = v.lastIndexOf('[', nuevo);
+      const cruzaLinea = v[paso > 0 ? sel.pos : nuevo] === '\n';
+      if (nuevo >= 0 && nuevo <= v.length && !cruzaLinea) sel = { pos: nuevo };
+      refrescar();
+    }
+  };
+  zona.onclick = e => {
+    const ch = e.target.closest('.ea-ch');
+    const w = e.target.closest('.ea-w');
+    if (ch) sel = sel?.ini === +ch.dataset.ini ? null : { ini: +ch.dataset.ini, fin: +ch.dataset.fin };
+    else if (w) sel = sel?.pos === +w.dataset.pos ? null : { pos: +w.dataset.pos };
+    else return;
+    refrescar();
+  };
+  form.tono_original.onchange = pintarTeclas;
+  refrescar();
+
   form.onsubmit = e => {
     e.preventDefault();
     ocupado(form.querySelector('[type=submit]'), async () => {
@@ -632,11 +817,12 @@ async function vistaCancion(ctx) {
   cargando('Canción', { atras: '#/canciones' });
   const id = ctx.id;
   const setId = ctx.q.get('set');
-  const [rc, rn, rt, rs] = await Promise.all([
-    sb.from('canciones').select('*').eq('id', id).maybeSingle(),
-    sb.from('notas_cancion').select('*').eq('cancion_id', id),
-    sb.from('tonos_cantante').select('*').eq('cancion_id', id),
-    setId ? sb.from('setlist_items').select('id, cancion_id, cantante_id, tono, notas, orden').eq('setlist_id', setId).order('orden') : Promise.resolve({ data: null }),
+  const [rc, rn, rt, rs, rp] = await Promise.all([
+    conCache('cancion:' + id, sb.from('canciones').select('*').eq('id', id).maybeSingle()),
+    conCache('notas:' + id, sb.from('notas_cancion').select('*').eq('cancion_id', id)),
+    conCache('tonos:' + id, sb.from('tonos_cantante').select('*').eq('cancion_id', id)),
+    setId ? conCache('items:' + setId, sb.from('setlist_items').select(SEL_ITEMS).eq('setlist_id', setId).order('orden')) : Promise.resolve({ data: null }),
+    conCache('partituras:' + id, sb.from('partituras').select('*').eq('cancion_id', id).order('created_at')),
   ]);
   if (!ctx.vigente()) return;
   const err = rc.error || rn.error || rt.error || rs.error;
@@ -645,6 +831,9 @@ async function vistaCancion(ctx) {
   if (!c) { app.innerHTML = encabezado('Canción', { atras: '#/canciones' }) + '<div class="vacio">Esta canción ya no existe.</div>'; return; }
 
   const notas = Object.fromEntries((rn.data || []).map(n => [n.instrumento, n]));
+  const partituras = rp.error ? [] : (rp.data || []);
+  const ordenPart = p => (p.instrumento === st.perfil.instrumento ? 0 : p.instrumento === 'bateria' ? 1 : 2);
+  partituras.sort((a, b) => ordenPart(a) - ordenPart(b));
   const tonos = (rt.data || []).sort((a, b) => nombreDe(a.cantante_id).localeCompare(nombreDe(b.cantante_id)));
   const items = rs.data;
   const idx = items ? Math.max(0, items.findIndex((it, i) => it.cancion_id === id && (ctx.q.get('i') == null || i === +ctx.q.get('i')))) : -1;
@@ -702,6 +891,7 @@ async function vistaCancion(ctx) {
         ${puedeTonos() ? `<button class="chip" data-acc="tonos">🎤 ${tonos.length ? 'Tonos' : 'Guardar tono'}</button>` : ''}
       </div>` : (esAdmin() ? `<p class="ayuda">Define el tono original (✏️) para poder guardar tonos por cantante.</p>` : '')}
       ${misNotas.map(([k, v]) => `<div class="card nota-mia"><b>📝 ${esc(k)}:</b> ${esc(v)}</div>`).join('')}
+      ${partituras.some(p => p.instrumento === miInstr) ? `<button class="btn sm" style="margin-bottom:10px" data-acc="ver-part" data-instr="${esc(miInstr)}">📄 Ver mi partitura (${esc(INSTRUMENTOS[miInstr] || miInstr)})</button>` : ''}
       <div class="letra ${ajustes.acordes ? '' : 'sin-acordes'}" style="--fuente-letra:${ajustes.fuente}px">
         ${c.letra ? renderLetra(c.letra, { semis, bemoles: bem, acordes: ajustes.acordes, latino: ajustes.latino }) : '<div class="vacio">Sin letra todavía.</div>'}
       </div>
@@ -715,6 +905,17 @@ async function vistaCancion(ctx) {
            <button class="btn sm" style="margin-top:8px" data-acc="editar-nota">✏️ ${notas[tabNota]?.contenido ? 'Editar' : 'Agregar'} nota</button>
            ${notas[tabNota]?.updated_at ? `<span class="ayuda" style="margin-left:8px">${esc(nombreDe(notas[tabNota].autor_id))} · ${haceCuanto(notas[tabNota].updated_at)}</span>` : ''}`}
       </div>
+      <div class="seccion-t">📄 Partituras</div>
+      ${partituras.length ? `<div class="partituras">${partituras.map(p => `
+        <div class="part-item">
+          ${p.tipo === 'imagen'
+            ? `<img src="${esc(p.url)}" alt="" loading="lazy" data-acc="ver-part" data-instr="${esc(p.instrumento)}">`
+            : `<button class="part-doc" data-acc="abrir-part" data-id="${p.id}">${p.tipo === 'pdf' ? '📄 PDF' : '🔗 Link'}</button>`}
+          <div class="part-info"><b>${ICON_INSTR[p.instrumento] || '📄'} ${esc(INSTRUMENTOS[p.instrumento] || p.instrumento)}</b>
+            <small>${esc(p.titulo || '')}${p.titulo ? ' · ' : ''}${esc(nombreDe(p.subido_por))}</small></div>
+          ${p.subido_por === st.uid || esAdmin() ? `<button class="x" data-acc="borrar-part" data-id="${p.id}" aria-label="Eliminar">🗑️</button>` : ''}
+        </div>`).join('')}</div>` : '<p class="ayuda">Aún no hay partituras para esta canción.</p>'}
+      <button class="btn sm" data-acc="subir-part">＋ Subir partitura</button>
       ${c.video_url ? `<div class="seccion-t">Referencia</div>${embedVideo(c.video_url)}` : ''}
       ${esAdmin() ? `<button class="btn peligro blk" data-acc="borrar" style="margin-top:28px">Eliminar canción</button>` : ''}
       ${items ? `<div style="height:56px"></div>` : ''}`;
@@ -792,6 +993,17 @@ async function vistaCancion(ctx) {
       });
     }
     else if (acc === 'tonos') modalTonos(c, tonos, () => rutear());
+    else if (acc === 'ver-part') verPartituras(partituras.filter(p => p.instrumento === el.dataset.instr));
+    else if (acc === 'abrir-part') abrirArchivo(partituras.find(p => p.id === el.dataset.id));
+    else if (acc === 'subir-part') modalPartitura(c);
+    else if (acc === 'borrar-part') {
+      const p = partituras.find(x => x.id === el.dataset.id);
+      if (!confirm('¿Eliminar esta partitura?')) return;
+      const { error } = await sb.from('partituras').delete().eq('id', p.id);
+      if (error) return fallo(error, 'Partitura');
+      if (p.ruta) sb.storage.from('partituras').remove([p.ruta]);
+      toast('Partitura eliminada'); rutear();
+    }
     else if (acc === 'editar') modalCancion(c);
     else if (acc === 'borrar') {
       if (!confirm(`¿Eliminar "${c.titulo}"? También se borran sus notas, tonos y su lugar en los ensayos.`)) return;
@@ -799,6 +1011,101 @@ async function vistaCancion(ctx) {
       if (error) return fallo(error, 'Canción');
       toast('Canción eliminada'); location.hash = '#/canciones';
     }
+  };
+}
+
+// ---------- partituras ----------
+function verPartituras(lista) {
+  const imgs = lista.filter(p => p.tipo === 'imagen');
+  const otros = lista.filter(p => p.tipo !== 'imagen');
+  if (!imgs.length && otros.length === 1) return abrirArchivo(otros[0]);
+  const body = abrirModal('', `
+    <div class="visor-part">
+      <button class="visor-cerrar" data-cerrar aria-label="Cerrar">×</button>
+      ${imgs.map(p => `<img src="${esc(p.url)}" alt="${esc(p.titulo || 'Partitura')}">`).join('')}
+      ${otros.map(p => `<button class="btn blk" data-doc="${p.id}">${p.tipo === 'pdf' ? '📄 Abrir PDF' : '🔗 Abrir link'} ${esc(p.titulo || '')}</button>`).join('')}
+    </div>`, { visor: true });
+  body.querySelectorAll('[data-cerrar]').forEach(b => (b.onclick = cerrarModal));
+  body.querySelectorAll('[data-doc]').forEach(b => (b.onclick = () => abrirArchivo(otros.find(p => p.id === b.dataset.doc))));
+}
+
+async function abrirArchivo(p) {
+  if (!p) return;
+  if (p.tipo !== 'pdf') return window.open(p.url, '_blank', 'noopener');
+  // PDF: usar la copia guardada si existe (sirve sin internet)
+  try {
+    const r = (await caches.match(p.url)) || (await fetch(p.url));
+    const u = URL.createObjectURL(await r.blob());
+    if (!window.open(u, '_blank')) location.href = u;
+  } catch { window.open(p.url, '_blank', 'noopener'); }
+}
+
+function modalPartitura(c) {
+  const def = INSTRUMENTOS[st.perfil.instrumento] && !['voz', 'coros'].includes(st.perfil.instrumento) ? st.perfil.instrumento : 'bateria';
+  const body = abrirModal('Subir partitura', `
+    <form id="fPart">
+      <p class="ayuda" style="margin-top:0">${esc(c.titulo)}</p>
+      <label>Instrumento</label><select name="instrumento">${opcionesInstrumento(def)}</select>
+      <label>Título (opcional)</label><input name="titulo" maxlength="80" placeholder="Ej: Groove del coro, Hoja 1">
+      <div class="segmentado" id="segOrigen" style="margin-top:14px">
+        <button type="button" data-o="archivo" class="activo">📷 Foto o PDF</button>
+        <button type="button" data-o="link">🔗 Link</button>
+      </div>
+      <div id="oArchivo">
+        <input type="file" name="archivos" accept="image/*,application/pdf" multiple>
+        <p class="ayuda">Puedes tomar la foto con la cámara o elegir varias páginas a la vez. Máx. 15 MB por archivo.</p>
+      </div>
+      <div id="oLink" hidden>
+        <input name="url" type="url" inputmode="url" placeholder="https://drive.google.com/…">
+        <p class="ayuda">En Drive, comparte como "Cualquier persona con el enlace".</p>
+      </div>
+      <button class="btn prim blk" type="submit">Subir</button>
+    </form>`);
+  const form = $('#fPart', body);
+  let origen = 'archivo';
+  $('#segOrigen', body).onclick = e => {
+    const b = e.target.closest('[data-o]'); if (!b) return;
+    origen = b.dataset.o;
+    body.querySelectorAll('[data-o]').forEach(x => x.classList.toggle('activo', x === b));
+    $('#oArchivo', body).hidden = origen !== 'archivo';
+    $('#oLink', body).hidden = origen !== 'link';
+  };
+  form.onsubmit = e => {
+    e.preventDefault();
+    ocupado(form.querySelector('[type=submit]'), async () => {
+      const instrumento = form.instrumento.value;
+      const titulo = form.titulo.value.trim() || null;
+      const filas = [];
+      try {
+        if (origen === 'link') {
+          const url = urlSegura(form.url.value.trim());
+          if (!url) return toast('El link no es válido', true);
+          filas.push({ cancion_id: c.id, instrumento, titulo, tipo: 'link', url, subido_por: st.uid });
+        } else {
+          const archivos = [...form.archivos.files];
+          if (!archivos.length) return toast('Elige una foto o un PDF', true);
+          for (const [i, f] of archivos.entries()) {
+            const esPdf = f.type === 'application/pdf';
+            const blob = esPdf ? f : await comprimirImagen(f, 2400, 0.9);
+            if (blob.size > 15 * 1024 * 1024) { toast(`${f.name} pesa más de 15 MB`, true); continue; }
+            const ext = esPdf ? 'pdf' : blob.type === 'image/png' ? 'png' : blob.type === 'image/heic' ? 'heic' : 'jpg';
+            const ruta = `${st.uid}/${c.id}-${Date.now()}-${i}.${ext}`;
+            const { error } = await sb.storage.from('partituras').upload(ruta, blob, { contentType: blob.type || (esPdf ? 'application/pdf' : 'image/jpeg') });
+            if (error) throw error;
+            filas.push({
+              cancion_id: c.id, instrumento, subido_por: st.uid, ruta,
+              titulo: archivos.length > 1 ? `${titulo || 'Página'} ${i + 1}` : titulo,
+              tipo: esPdf ? 'pdf' : 'imagen',
+              url: sb.storage.from('partituras').getPublicUrl(ruta).data.publicUrl,
+            });
+          }
+        }
+        if (!filas.length) return;
+        const { error } = await sb.from('partituras').insert(filas);
+        if (error) throw error;
+        cerrarModal(); toast(filas.length > 1 ? `${filas.length} páginas subidas` : 'Partitura subida'); rutear();
+      } catch (err) { fallo(err, 'Partitura'); }
+    });
   };
 }
 
@@ -854,6 +1161,7 @@ const DIAS_SEM = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes
 const DIAS_INI = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 const ICON_ESTADO = { confirmado: '✅', rechazado: '❌', pendiente: '⏳' };
 const SEL_DIA = '*, asignaciones(id, perfil_id, rol, estado)';
+const SEL_ITEMS = '*, cancion:canciones(id, titulo, artista, tono_original)';
 const pad = n => String(n).padStart(2, '0');
 const claveDia = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const isoSinMs = d => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -870,8 +1178,8 @@ const tipoDe = s => st.tipos.find(t => t.id === s.tipo_evento_id)
 const esTipoEnsayo = t => /ensayo/i.test(t?.nombre || '');
 
 async function cargarTipos() {
-  const { data, error } = await sb.from('tipos_evento').select('*').order('orden');
-  st.faltaV2 = !!error;
+  const { data, error } = await conCache('tipos', sb.from('tipos_evento').select('*').order('orden'));
+  st.faltaV2 = !!error && !esErrorRed(error);
   st.tipos = data || [];
 }
 
@@ -931,9 +1239,9 @@ async function responderAsignacion(id, estado) {
 
 async function misPendientes() {
   if (st.faltaV2) return [];
-  const { data } = await sb.from('asignaciones')
+  const { data } = await conCache('pendientes', sb.from('asignaciones')
     .select('id, rol, estado, setlist:setlists(id, titulo, fecha, tipo_evento_id, tipo)')
-    .eq('perfil_id', st.uid).eq('estado', 'pendiente');
+    .eq('perfil_id', st.uid).eq('estado', 'pendiente'));
   const limite = Date.now() - 12 * 3600e3;
   return (data || []).filter(a => a.setlist && new Date(a.setlist.fecha) >= limite)
     .sort((a, b) => a.setlist.fecha.localeCompare(b.setlist.fecha));
@@ -966,11 +1274,12 @@ async function vistaAgenda(ctx) {
   const [ini, fin] = rangoMes(mes);
   const a = isoSinMs(ini), b = isoSinMs(fin);
   const [rm, rp, pend] = await Promise.all([
-    sb.from('setlists').select(SEL_DIA).or(`and(fecha.gte.${a},fecha.lt.${b}),and(ensayo_fecha.gte.${a},ensayo_fecha.lt.${b})`).order('fecha'),
-    sb.from('setlists').select(SEL_DIA).gte('fecha', isoSinMs(new Date(Date.now() - 12 * 3600e3))).order('fecha').limit(40),
+    conCache('agenda:' + mes, sb.from('setlists').select(SEL_DIA).or(`and(fecha.gte.${a},fecha.lt.${b}),and(ensayo_fecha.gte.${a},ensayo_fecha.lt.${b})`).order('fecha')),
+    conCache('proximos', sb.from('setlists').select(SEL_DIA).gte('fecha', isoSinMs(new Date(Date.now() - 12 * 3600e3))).order('fecha').limit(40)),
     misPendientes(),
   ]);
   if (!ctx.vigente()) return;
+  if (rm.error && esErrorRed(rm.error) && rp.data) rm.data = rp.data, rm.error = null;   // sin internet: usar lo descargado
   if (rm.error || rp.error) return fallo(rm.error || rp.error, 'Agenda');
 
   const porDia = {};
@@ -1295,8 +1604,8 @@ async function vistaPlan(ctx) {
   cargando('Planificación', { atras: `#/agenda?mes=${mes}` });
   if (st.faltaV2) { app.innerHTML = encabezado('Planificación', { atras: '#/agenda' }) + avisoV2(); return; }
   const [ini, fin] = rangoMes(mes);
-  const { data, error } = await sb.from('setlists').select(SEL_DIA + ', setlist_items(id)')
-    .gte('fecha', isoSinMs(ini)).lt('fecha', isoSinMs(fin)).order('fecha');
+  const { data, error } = await conCache('plan:' + mes, sb.from('setlists').select(SEL_DIA + ', setlist_items(id)')
+    .gte('fecha', isoSinMs(ini)).lt('fecha', isoSinMs(fin)).order('fecha'));
   if (!ctx.vigente()) return;
   if (error) return fallo(error, 'Planificación');
   const usados = new Set(data.flatMap(s => s.asignaciones.map(a => a.rol)));
@@ -1341,8 +1650,8 @@ async function vistaPlan(ctx) {
 async function vistaDia(ctx) {
   cargando('Día', { atras: '#/agenda' });
   const [rs, ri, rv] = await Promise.all([
-    sb.from('setlists').select(st.faltaV2 ? '*' : SEL_DIA).eq('id', ctx.id).maybeSingle(),
-    sb.from('setlist_items').select('*, cancion:canciones(id, titulo, artista, tono_original)').eq('setlist_id', ctx.id).order('orden'),
+    conCache('dia:' + ctx.id, sb.from('setlists').select(st.faltaV2 ? '*' : SEL_DIA).eq('id', ctx.id).maybeSingle()),
+    conCache('items:' + ctx.id, sb.from('setlist_items').select(SEL_ITEMS).eq('setlist_id', ctx.id).order('orden')),
     st.faltaV2 ? Promise.resolve({ data: null }) : sb.from('en_vivo').select('*').eq('setlist_id', ctx.id).maybeSingle(),
   ]);
   if (!ctx.vigente()) return;
@@ -1652,6 +1961,58 @@ async function vistaEquipo(ctx) {
 // =====================================================================
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); st.instalarEvt = e; });
 
+async function descargarSinConexion(btn) {
+  if (!navigator.onLine) return toast('Necesitas internet para descargar', true);
+  const txt = btn.textContent;
+  btn.disabled = true;
+  const paso = t => (btn.textContent = t);
+  try {
+    paso('Descargando canciones…');
+    const desde = isoSinMs(new Date(Date.now() - 12 * 3600e3));
+    const [rc, rn, rt, rp, rs] = await Promise.all([
+      sb.from('canciones').select('*').order('titulo'),
+      sb.from('notas_cancion').select('*'),
+      sb.from('tonos_cantante').select('*'),
+      sb.from('partituras').select('*').order('created_at'),
+      st.faltaV2 ? Promise.resolve({ data: [] }) : sb.from('setlists').select(SEL_DIA).gte('fecha', desde).order('fecha').limit(40),
+    ]);
+    const err = [rc, rn, rt, rs].find(r => r.error)?.error;
+    if (err) throw err;
+    const parts = rp.error ? [] : rp.data;
+    const k = c => `${st.uid}:${c}`;
+    const por = (arr, campo) => arr.reduce((m, x) => ((m[x[campo]] ??= []).push(x), m), {});
+    const notas = por(rn.data, 'cancion_id'), tonos = por(rt.data, 'cancion_id'), pp = por(parts, 'cancion_id');
+    await idb.set(k('canciones'), rc.data.map(({ id, titulo, artista, tono_original }) => ({ id, titulo, artista, tono_original })));
+    await idb.set(k('partituras-idx'), parts.map(({ cancion_id, instrumento }) => ({ cancion_id, instrumento })));
+    for (const c of rc.data) {
+      await idb.set(k('cancion:' + c.id), c);
+      await idb.set(k('notas:' + c.id), notas[c.id] || []);
+      await idb.set(k('tonos:' + c.id), tonos[c.id] || []);
+      await idb.set(k('partituras:' + c.id), pp[c.id] || []);
+    }
+    paso('Descargando agenda…');
+    await idb.set(k('proximos'), rs.data);
+    const ids = rs.data.map(s => s.id);
+    if (ids.length) {
+      const { data: its, error } = await sb.from('setlist_items').select(SEL_ITEMS).in('setlist_id', ids).order('orden');
+      if (error) throw error;
+      const pi = por(its, 'setlist_id');
+      for (const s of rs.data) { await idb.set(k('dia:' + s.id), s); await idb.set(k('items:' + s.id), pi[s.id] || []); }
+    }
+    const archivos = parts.filter(p => p.tipo !== 'link');
+    let ok = 0;
+    const cache = await caches.open('alabanza-archivos');
+    for (const [i, p] of archivos.entries()) {
+      paso(`Descargando partituras ${i + 1}/${archivos.length}…`);
+      try { if (!(await cache.match(p.url))) { const r = await fetch(p.url); if (r.ok) await cache.put(p.url, r); } ok++; } catch {}
+    }
+    try { localStorage.setItem('alabanza.descarga', new Date().toISOString()); } catch {}
+    $('#ultDescarga') && ($('#ultDescarga').textContent = 'Última descarga: ahora');
+    toast(`Listo: ${rc.data.length} canciones, ${rs.data.length} días y ${ok} partituras disponibles sin internet`);
+  } catch (e) { fallo(e, 'Descarga'); }
+  finally { btn.disabled = false; btn.textContent = txt; }
+}
+
 function vistaPerfil() {
   const p = st.perfil;
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
@@ -1670,6 +2031,12 @@ function vistaPerfil() {
       <p>📲 ${ios ? 'Para instalar en iPhone: abre en <b>Safari</b>, toca <b>Compartir</b> ⬆️ y luego <b>"Agregar a inicio"</b>.' : 'Instala la app en tu celular para abrirla como cualquier otra.'}</p>
       ${!ios ? `<button class="btn sm prim" id="bInstalar">Instalar</button>` : ''}
     </div>` : ''}
+    <div class="card">
+      <b>📴 Usar sin internet</b>
+      <p class="ayuda" style="margin:4px 0 10px">Descarga todas las canciones (letra, notas, tonos y partituras) y los próximos días de la agenda para verlos sin señal. Lo que abras con internet también se guarda solo.</p>
+      <button class="btn prim blk" id="bOffline" style="margin-top:0">⬇️ Descargar para usar sin internet</button>
+      <p class="ayuda" id="ultDescarga">${(() => { try { const t = localStorage.getItem('alabanza.descarga'); return t ? 'Última descarga: ' + haceCuanto(t) : ''; } catch { return ''; } })()}</p>
+    </div>
     <button class="btn blk" id="bClave">Cambiar contraseña</button>
     <button class="btn peligro blk" id="bSalir">Cerrar sesión</button>
     <p class="ayuda" style="text-align:center;margin-top:20px">${esc(APP_NOMBRE)}</p>`;
@@ -1686,7 +2053,8 @@ function vistaPerfil() {
   };
   $('#chkLatino').onchange = e => { ajustes.latino = e.target.checked; guardarAjustes(); toast('Listo'); };
   $('#bClave').onclick = modalNuevaClave;
-  $('#bSalir').onclick = async () => { await sb.auth.signOut(); location.hash = ''; };
+  $('#bSalir').onclick = async () => { await idb.limpiar(); await sb.auth.signOut(); location.hash = ''; };
+  $('#bOffline').onclick = e => descargarSinConexion(e.currentTarget);
   const bi = $('#bInstalar');
   if (bi) bi.onclick = async () => {
     if (st.instalarEvt) { st.instalarEvt.prompt(); st.instalarEvt = null; }
