@@ -1,7 +1,7 @@
 // Service worker: permite instalar la app y abrirla sin conexión.
 // Estrategia: red primero para los archivos de la app (siempre la última versión),
 // con copia en caché como respaldo. Las llamadas a Supabase no se tocan.
-const CACHE = 'alabanza-v1';
+const CACHE = 'alabanza-v2';
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'js/app.js', 'js/acordes.js', 'js/config.js',
   'manifest.webmanifest', 'icons/logo.png', 'icons/icon-192.png',

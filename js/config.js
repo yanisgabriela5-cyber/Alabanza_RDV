@@ -21,3 +21,17 @@ export const INSTRUMENTOS = {
 export const NOTAS_TABS = { general: 'General', ...Object.fromEntries(Object.entries(INSTRUMENTOS).filter(([k]) => k !== 'otro')) };
 
 export const REACCIONES = ['🙌', '🔥', '❤️', '🙏', '👍'];
+
+// Roles para el equipo de cada día
+export const ROLES = {
+  dirige: 'Dirige',
+  voz: 'Voz',
+  coros: 'Coros',
+  piano: 'Piano / Teclado',
+  guitarra: 'Guitarra acústica',
+  guitarra_electrica: 'Guitarra eléctrica',
+  bajo: 'Bajo',
+  bateria: 'Batería',
+  otro: 'Otro',
+};
+export const ROLES_CANTO = ['dirige', 'voz', 'coros'];
