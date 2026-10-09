@@ -221,11 +221,12 @@ function vistaAuth(modo = 'login', aviso = null) {
           email: f.email.trim(), password: f.clave,
           options: { data: { nombre: f.nombre.trim(), instrumento: f.instrumento }, emailRedirectTo: baseUrl() },
         });
-        if (error) msg(/already registered/i.test(error.message) ? 'Ese correo ya tiene cuenta. Usa "Entrar".' : error.message);
+        if (error) msg(/already registered/i.test(error.message) ? 'Ese correo ya tiene cuenta. Usa "Entrar".'
+          : /rate limit/i.test(error.message) ? 'Hay muchos registros seguidos. Espera unos minutos e inténtalo de nuevo.' : error.message);
         else if (!data.session) vistaAuth('login', { txt: 'Te enviamos un correo para confirmar tu cuenta. Después entra aquí; un administrador debe aprobarte.' });
       } else {
         const { error } = await sb.auth.resetPasswordForEmail(f.email.trim(), { redirectTo: baseUrl() });
-        if (error) msg(error.message); else msg('Si el correo está registrado, te llegará un enlace para cambiar la contraseña.', false);
+        if (error) msg(/rate limit/i.test(error.message) ? 'Se enviaron muchos correos seguidos. Espera unos minutos e inténtalo de nuevo.' : error.message); else msg('Si el correo está registrado, te llegará un enlace para cambiar la contraseña.', false);
       }
     } catch (err) { msg(err.message || 'Error de conexión'); }
     finally { btn.disabled = false; }
