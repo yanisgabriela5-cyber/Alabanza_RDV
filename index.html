@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Roca de Vida · Alabanza</title>
+  <meta name="description" content="Muro, canciones, tonos y ensayos del equipo de alabanza.">
+  <meta name="theme-color" content="#11131c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Alabanza">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app">
+    <div class="cargando"><img src="icons/logo.png" alt="" class="logo-pulso"></div>
+  </div>
+
+  <nav id="nav" class="nav" hidden>
+    <a href="#/muro" data-tab="muro"><span class="ico">📣</span><span>Muro</span></a>
+    <a href="#/canciones" data-tab="canciones"><span class="ico">🎵</span><span>Canciones</span></a>
+    <a href="#/ensayos" data-tab="ensayos"><span class="ico">📅</span><span>Ensayos</span></a>
+    <a href="#/equipo" data-tab="equipo"><span class="ico">👥</span><span>Equipo</span><b id="badgePend" class="badge" hidden></b></a>
+  </nav>
+
+  <dialog id="modal"><div id="modalBody"></div></dialog>
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+  </script>
+</body>
+</html>

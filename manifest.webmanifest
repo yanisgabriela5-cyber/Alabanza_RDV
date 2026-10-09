@@ -1,0 +1,17 @@
+{
+  "name": "Roca de Vida · Alabanza",
+  "short_name": "Alabanza",
+  "description": "Muro, canciones, tonos y ensayos del equipo de alabanza de Roca de Vida Panamá.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#11131c",
+  "theme_color": "#11131c",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
