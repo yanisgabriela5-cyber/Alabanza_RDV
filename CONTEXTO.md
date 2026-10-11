@@ -17,7 +17,7 @@ Costo: **$0** (GitHub Pages + plan gratis de Supabase).
 | Primer admin | yanisgabriela12@gmail.com |
 
 ## Tecnología
-- HTML/CSS/JS puro, sin compilación. Archivos: `index.html`, `css/styles.css`, `js/app.js` (toda la app), `js/acordes.js` (transposición), `js/config.js` (claves, instrumentos, roles), `sw.js` (offline), `manifest.webmanifest`, `icons/` (logo Roca de Vida).
+- HTML/CSS/JS puro, sin compilación. Archivos: `index.html`, `css/styles.css`, `js/app.js` (toda la app), `js/acordes.js` (transposición), `js/cifrado.js` (grilla de compases), `js/config.js` (claves, instrumentos, roles), `sw.js` (offline), `manifest.webmanifest`, `icons/` (logo Roca de Vida).
 - Supabase: login con correo/contraseña, base de datos Postgres con seguridad RLS, almacenamiento de imágenes (bucket `media`, 10 MB) y tiempo real.
 - Librería: `@supabase/supabase-js@2.45.4` desde jsDelivr.
 - Tema oscuro, dorado como color de acento.
@@ -40,7 +40,7 @@ Ambos scripts se pueden volver a ejecutar sin borrar datos.
 
 ## Funciones actuales
 1. **Muro:** comunicados, frases, imágenes y videos de YouTube o Drive. Publicaciones fijadas, comentarios y reacciones en tiempo real. Banners de "Te toca servir" y "En vivo ahora". Tarjeta "Programa" con el resumen de un día.
-2. **Canciones:** letra con acordes (`[G]letra` o acordes sobre la línea), transposición, cifrado americano o latino, tamaño de letra, notas por instrumento y tono guardado por cantante.
+2. **Canciones:** vista 📝 Letra / 🎼 Cifrado (grilla de compases estilo iReal: secciones A/B/C, 4 compases por fila, se transpone). Si la canción no tiene cifrado guardado se genera automático desde la letra (1 acorde = 1 compás) y el admin lo ajusta con ✏️ (sintaxis `*A Verso` / `| C#m | B/D# | E |`, `%` repite). Letra con acordes (`[G]letra` o acordes sobre la línea), transposición, cifrado americano o latino, tamaño de letra, notas por instrumento y tono guardado por cantante.
 3. **Agenda:**
    - Calendario mensual con tipos de día:
      - 📖 Estudio bíblico: miércoles 8:00 pm, ensayo 6:30 pm.
@@ -49,7 +49,8 @@ Ambos scripts se pueden volver a ejecutar sin borrar datos.
      - 🎹 Ensayo.
    - **Generar mes:** crea automáticamente los días recurrentes.
    - **Planificación:** tabla del mes por rol, con conteo de participación.
-   - **Equipo del día:** cantores e instrumentistas; cada uno confirma ✅ / ❌.
+   - **Equipo del día:** cantores (rol único **Voz**, con marca 👑 **Dirige** por día) e instrumentistas; cada uno confirma ✅ / ❌.
+   - **Chat del día:** conversación en tiempo real dentro de cada evento.
    - **Publicar en el muro** y **compartir por WhatsApp.**
 4. **Modo en vivo:** un admin inicia desde el día y, al cambiar de canción, a todos les cambia la pantalla en el tono asignado. Cada uno ve arriba la nota general y la de su instrumento. Se puede pasar a modo "Libre".
 5. **Editor de acordes:** botonera con los acordes del tono y modo "Tocar acordes" (tocar palabra → tocar acorde), sin escribir corchetes.
@@ -65,6 +66,9 @@ Ambos scripts se pueden volver a ejecutar sin borrar datos.
 - [ ] Rotar la secret key de Supabase (quedó expuesta en el chat original).
 - [ ] Probar el modo en vivo con dos celulares en un ensayo real.
 - [ ] Invitar al equipo (mensaje de WhatsApp con el link e instrucciones para instalar).
+
+## Instrumentos
+Voz, Piano / Teclado, Guitarra acústica, Guitarra eléctrica, Bajo, Batería, Percusión menor, Otro. ("Voz principal" y "Coros" se unificaron en "Voz".)
 
 ## Ideas no implementadas aún
 - Notificaciones push (recordatorio de días asignados).

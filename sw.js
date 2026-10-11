@@ -2,10 +2,10 @@
 // - Archivos de la app: red primero (siempre la última versión), copia en caché como respaldo.
 // - Imágenes y partituras de Supabase Storage: caché primero (no cambian), red si no están.
 // - Datos de Supabase (REST): no se tocan; la app guarda su propia copia (IndexedDB).
-const CACHE = 'alabanza-v4';
+const CACHE = 'alabanza-v6';
 const ARCHIVOS = 'alabanza-archivos';
 const SHELL = [
-  './', 'index.html', 'css/styles.css', 'js/app.js', 'js/acordes.js', 'js/config.js',
+  './', 'index.html', 'css/styles.css', 'js/app.js', 'js/acordes.js', 'js/cifrado.js', 'js/config.js',
   'manifest.webmanifest', 'icons/logo.png', 'icons/icon-192.png',
 ];
 
