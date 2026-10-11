@@ -23,6 +23,7 @@ const st = {
   tipos: [],            // tipos de día (agenda)
   faltaV2: false,       // true si falta ejecutar 002_agenda.sql
   faltaV4: false,       // true si falta ejecutar 004_voz_dirige_chat.sql
+  faltaV6: false,       // true si falta ejecutar 006_ritmo.sql
   seguirVivo: true,     // seguir al líder en modo en vivo
 };
 
@@ -352,7 +353,7 @@ function cargando(titulo, opts) {
 async function vistaMuro(ctx) {
   cargando('Muro', { sub: 'Roca de Vida Panamá' });
   const render = async () => {
-    const SEL_PROG = ', setlist:setlists(id, titulo, fecha, ensayo_fecha, lugar, tipo, tipo_evento_id, asignaciones(perfil_id, rol, estado), setlist_items(orden, tono, cantante_id, cancion:canciones(titulo, tono_original)))';
+    const SEL_PROG = ', setlist:setlists(id, titulo, fecha, ensayo_fecha, lugar, tipo, tipo_evento_id, asignaciones(perfil_id, rol, estado), setlist_items(orden, tono, cantante_id' + (st.faltaV6 ? '' : ', ritmo') + ', cancion:canciones(titulo, tono_original' + (st.faltaV6 ? '' : ', ritmo') + ')))';
     const [{ data, error }, pend, rv] = await Promise.all([
       conCache('muro', sb.from('publicaciones')
         .select('*, comentarios(id, contenido, created_at, autor_id), reacciones(emoji, usuario_id)' + (st.faltaV2 ? '' : SEL_PROG))
@@ -604,7 +605,7 @@ function modalPost(post, alGuardar) {
 async function vistaCanciones(ctx) {
   cargando('Canciones');
   const [{ data, error }, rpart] = await Promise.all([
-    conCache('canciones', sb.from('canciones').select('id, titulo, artista, tono_original').order('titulo')),
+    conCache('canciones', sb.from('canciones').select(st.faltaV6 ? 'id, titulo, artista, tono_original' : 'id, titulo, artista, tono_original, ritmo').order('titulo')),
     conCache('partituras-idx', sb.from('partituras').select('cancion_id, instrumento')),
   ]);
   if (!ctx.vigente()) return;
@@ -612,18 +613,18 @@ async function vistaCanciones(ctx) {
   const filtro = ctx.q.get('b') || '';
   const partes = {};   // cancion_id -> Set(instrumentos con partitura)
   (rpart.data || []).forEach(p => (partes[p.cancion_id] ??= new Set()).add(p.instrumento));
-  let soloPart = false;
+  let soloPart = false, filtroRitmo = '';
   app.innerHTML = encabezado('Canciones', { sub: `${data.length} en el repertorio` }) + `
     <div class="buscador"><input id="busca" type="search" placeholder="Buscar por título o artista" value="${esc(filtro)}"></div>
-    <div class="segmentado" id="segPart"><button data-p="0" class="activo">Todas</button><button data-p="1">📄 Con partitura</button></div>
+    <div class="segmentado" id="segPart"><button data-p="0" class="activo">Todas</button>${st.faltaV6 ? '' : '<button data-p="rapida">⚡ Rápidas</button><button data-p="lenta">🕊️ Lentas</button>'}<button data-p="1">📄 Partitura</button></div>
     <div class="lista" id="lista"></div>
     ${esAdmin() ? `<button class="fab" data-acc="nueva" aria-label="Nueva canción">+</button>` : ''}`;
   const pintar = () => {
     const q = normalizar($('#busca').value);
-    const res = data.filter(c => (!q || normalizar(c.titulo + ' ' + (c.artista || '')).includes(q)) && (!soloPart || partes[c.id]));
+    const res = data.filter(c => (!q || normalizar(c.titulo + ' ' + (c.artista || '')).includes(q)) && (!soloPart || partes[c.id]) && (!filtroRitmo || c.ritmo === filtroRitmo));
     $('#lista').innerHTML = res.map(c => `
       <a class="item" href="#/cancion/${c.id}">
-        <div class="info"><b>${esc(c.titulo)}</b><small>${esc(c.artista || 'Sin artista')}${partes[c.id] ? ' · 📄 ' + [...partes[c.id]].map(i => ICON_INSTR[i] || '📄').join('') : ''}</small></div>
+        <div class="info"><b>${ICON_RITMO[c.ritmo] ? `<span title="${esc(RITMOS[c.ritmo])}">${ICON_RITMO[c.ritmo]}</span> ` : ''}${esc(c.titulo)}</b><small>${esc(c.artista || 'Sin artista')}${partes[c.id] ? ' · 📄 ' + [...partes[c.id]].map(i => ICON_INSTR[i] || '📄').join('') : ''}</small></div>
         <span class="tono-pill">${esc(tonoTxt(c.tono_original))}</span>
       </a>`).join('') || `<div class="vacio"><span class="grande">🎵</span>${data.length ? 'Sin resultados.' : 'Aún no hay canciones.'}${!data.length && esAdmin() ? '<br>Toca <b>+</b> para agregar la primera.' : ''}</div>`;
   };
@@ -632,7 +633,7 @@ async function vistaCanciones(ctx) {
   app.onclick = e => {
     if (e.target.closest('[data-acc=nueva]')) return modalCancion(null);
     const b = e.target.closest('[data-p]');
-    if (b) { soloPart = b.dataset.p === '1'; $('#segPart').querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b)); pintar(); }
+    if (b) { soloPart = b.dataset.p === '1'; filtroRitmo = RITMOS[b.dataset.p] ? b.dataset.p : ''; $('#segPart').querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b)); pintar(); }
   };
 }
 
@@ -647,6 +648,8 @@ function modalCancion(c) {
         <div><label>BPM</label><input name="bpm" type="number" min="30" max="260" inputmode="numeric" value="${esc(x.bpm)}"></div>
         <div><label>Compás</label><input name="compas" maxlength="10" placeholder="4/4" value="${esc(x.compas)}"></div>
       </div>
+      ${st.faltaV6 ? '' : `<label>Ritmo</label><select name="ritmo"><option value="">Sin definir</option>${Object.entries(RITMOS).map(([k, v]) =>
+        `<option value="${k}" ${x.ritmo === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`}
       <label>Letra con acordes</label>
       <div class="segmentado" id="eaModos">
         <button type="button" data-modo="texto" class="activo">✏️ Escribir</button>
@@ -801,6 +804,7 @@ Cuan grande es Él…">${esc(x.letra)}</textarea>
         compas: f.compas.trim() || null,
         letra: f.letra,
         video_url: urlSegura(f.video_url.trim()) || null,
+        ...(st.faltaV6 ? {} : { ritmo: f.ritmo || null }),
       };
       if (datos.tono_original && !parseTono(datos.tono_original)) datos.tono_original = null;
       const q = c
@@ -822,7 +826,7 @@ async function vistaCancion(ctx) {
     conCache('cancion:' + id, sb.from('canciones').select('*').eq('id', id).maybeSingle()),
     conCache('notas:' + id, sb.from('notas_cancion').select('*').eq('cancion_id', id)),
     conCache('tonos:' + id, sb.from('tonos_cantante').select('*').eq('cancion_id', id)),
-    setId ? conCache('items:' + setId, sb.from('setlist_items').select(SEL_ITEMS).eq('setlist_id', setId).order('orden')) : Promise.resolve({ data: null }),
+    setId ? conCache('items:' + setId, sb.from('setlist_items').select(selItems()).eq('setlist_id', setId).order('orden')) : Promise.resolve({ data: null }),
     conCache('partituras:' + id, sb.from('partituras').select('*').eq('cancion_id', id).order('created_at')),
   ]);
   if (!ctx.vigente()) return;
@@ -863,6 +867,7 @@ async function vistaCancion(ctx) {
       original ? `<span class="tag">Original: ${esc(tonoTxt(original))}</span>` : '',
       c.bpm ? `<span class="tag">${c.bpm} BPM</span>` : '',
       c.compas ? `<span class="tag">${esc(c.compas)}</span>` : '',
+      ritmoDe(itemSet) || c.ritmo ? `<span class="tag">${esc(RITMOS[ritmoDe(itemSet) || c.ritmo])}</span>` : '',
       itemSet?.cantante_id ? `<span class="tag ok">🎤 ${esc(nombreDe(itemSet.cantante_id))}</span>` : '',
     ].join('');
     const lista = menor ? TONOS_MENORES : TONOS_MAYORES;
@@ -1241,7 +1246,26 @@ const DIAS_INI = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 const ICON_ESTADO = { confirmado: '✅', rechazado: '❌', pendiente: '⏳' };
 const SEL_ASIG = () => (st.faltaV4 ? 'id, perfil_id, rol, estado' : 'id, perfil_id, rol, estado, dirige');
 const selDia = () => `*, asignaciones(${SEL_ASIG()})`;
-const SEL_ITEMS = '*, cancion:canciones(id, titulo, artista, tono_original)';
+const SEL_ITEMS_BASE = '*, cancion:canciones(id, titulo, artista, tono_original)';
+const selItems = () => (st.faltaV6 ? SEL_ITEMS_BASE : '*, cancion:canciones(id, titulo, artista, tono_original, ritmo)');
+// ---------- ritmo (rápida / lenta) ----------
+const RITMOS = { rapida: '⚡ Rápida', lenta: '🕊️ Lenta' };
+const RITMOS_PL = { rapida: '⚡ Rápidas', lenta: '🕊️ Lentas', '': '🎵 Sin definir' };
+const ICON_RITMO = { rapida: '⚡', lenta: '🕊️' };
+const ritmoDe = it => it?.ritmo || it?.cancion?.ritmo || '';
+const ORDEN_RITMO = { rapida: 0, lenta: 1, '': 2 };
+const hayRitmo = items => items.some(i => ritmoDe(i));
+/** Reordena el repertorio de un día: primero rápidas, luego lentas, luego sin definir (respeta el orden dentro de cada grupo). */
+async function ordenarPorRitmo(setId) {
+  if (st.faltaV6) return false;
+  const { data, error } = await sb.from('setlist_items').select(selItems()).eq('setlist_id', setId).order('orden');
+  if (error || !data || !hayRitmo(data)) return false;
+  const nuevo = [...data].sort((a, b) => ORDEN_RITMO[ritmoDe(a)] - ORDEN_RITMO[ritmoDe(b)] || a.orden - b.orden);
+  const cambios = nuevo.map((it, k) => ({ it, k })).filter(({ it, k }) => it.orden !== k);
+  if (!cambios.length) return false;
+  await Promise.all(cambios.map(({ it, k }) => sb.from('setlist_items').update({ orden: k }).eq('id', it.id)));
+  return true;
+}
 const pad = n => String(n).padStart(2, '0');
 const claveDia = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const isoSinMs = d => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -1280,6 +1304,8 @@ async function cargarTipos() {
   if (!st.faltaV2 && navigator.onLine) {
     const r4 = await sb.from('asignaciones').select('dirige').limit(1);
     st.faltaV4 = !!r4.error && !esErrorRed(r4.error);
+    const r6 = await sb.from('setlist_items').select('ritmo').limit(1);
+    st.faltaV6 = !!r6.error && !esErrorRed(r6.error);
   }
 }
 
@@ -1360,7 +1386,7 @@ function resumenDia(s, items) {
     ${canto ? `<div class="rs-bloque"><div class="rs-t">🎤 Cantores</div>${canto}</div>` : ''}
     ${instr ? `<div class="rs-bloque"><div class="rs-t">🎸 Instrumentistas</div>${instr}</div>` : ''}
     ${its.length ? `<div class="rs-bloque"><div class="rs-t">🎵 Canciones</div><ol>${its.map(i =>
-      `<li>${esc(i.cancion.titulo)} — <b class="tono-txt">${esc(tonoTxt(i.tono || i.cancion.tono_original))}</b>${i.cantante_id ? ` <small>(${esc(nombreDe(i.cantante_id))})</small>` : ''}</li>`).join('')}</ol></div>` : ''}
+      `<li>${ICON_RITMO[ritmoDe(i)] ? ICON_RITMO[ritmoDe(i)] + ' ' : ''}${esc(i.cancion.titulo)} — <b class="tono-txt">${esc(tonoTxt(i.tono || i.cancion.tono_original))}</b>${i.cantante_id ? ` <small>(${esc(nombreDe(i.cantante_id))})</small>` : ''}</li>`).join('')}</ol></div>` : ''}
   </div>`;
 }
 
@@ -1739,6 +1765,10 @@ async function vistaPlan(ctx) {
       <b>${esc(nombreMes(mes))}</b>
       <a class="btn-ico" href="#/plan?mes=${moverMes(mes, 1)}" aria-label="Mes siguiente">›</a>
     </div>
+    ${data.length ? `<div class="fila" style="margin-bottom:10px">
+      <button class="btn sm" data-acc="xls-exp">⬇️ Exportar Excel</button>
+      ${esAdmin() ? '<button class="btn sm" data-acc="xls-imp">⬆️ Importar Excel</button><input type="file" id="xlsArchivo" accept=".xlsx,.xls,.csv" hidden>' : ''}
+    </div>` : ''}
     ${data.length ? `<div class="tabla-wrap"><table class="plan">
       <thead><tr><th>Día</th>${cols.map(c => `<th>${esc(ROLES[c])}</th>`).join('')}<th>🎵</th></tr></thead>
       <tbody>${data.map(s => {
@@ -1757,7 +1787,15 @@ async function vistaPlan(ctx) {
       <div class="card" style="font-size:14px">${[...conteo.entries()].sort((a, b) => b[1] - a[1]).map(([id, n]) => `${esc(nombreDe(id))} <b>${n}</b>`).join(' · ') || 'Nadie asignado aún.'}
       ${sinAsignar.length ? `<p class="ayuda" style="margin-bottom:0">Sin asignar: ${sinAsignar.map(p => esc(p.nombre)).join(', ')}</p>` : ''}</div>` : ''}`;
 
+  const archivo = $('#xlsArchivo');
+  if (archivo) archivo.onchange = () => { const f = archivo.files[0]; archivo.value = ''; if (f) importarExcel(f, mes, data); };
   app.onclick = e => {
+    const x = e.target.closest('[data-acc^=xls]');
+    if (x) {
+      if (x.dataset.acc === 'xls-exp') ocupado(x, () => exportarExcel(mes, data));
+      else archivo?.click();
+      return;
+    }
     const el = e.target.closest('[data-acc=celda]');
     if (!el || !esAdmin() || e.target.closest('a')) return;
     const s = data.find(x => x.id === el.dataset.id);
@@ -1765,12 +1803,163 @@ async function vistaPlan(ctx) {
   };
 }
 
+// ---------- Excel de asignaciones (una fila por día, una columna por rol) ----------
+let _xlsx = null;
+function cargarXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  return (_xlsx ??= new Promise((ok, mal) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    sc.onload = () => ok(window.XLSX);
+    sc.onerror = () => { _xlsx = null; mal(new Error('No se pudo cargar el lector de Excel (¿sin internet?)')); };
+    document.head.appendChild(sc);
+  }));
+}
+const COLS_EXCEL = () => [['dirige', 'Dirige'], ...Object.entries(ROLES)];
+const dosDig = n => String(n).padStart(2, '0');
+const fechaExcel = iso => { const d = new Date(iso); return `${dosDig(d.getDate())}/${dosDig(d.getMonth() + 1)}/${d.getFullYear()}`; };
+const horaExcel = iso => { const d = new Date(iso); return `${dosDig(d.getHours())}:${dosDig(d.getMinutes())}`; };
+
+async function exportarExcel(mes, data) {
+  let X;
+  try { X = await cargarXLSX(); } catch (e) { return toast(e.message, true); }
+  const cols = COLS_EXCEL();
+  const filas = data.map(s => {
+    const asig = (s.asignaciones || []).filter(a => a.estado !== 'rechazado');
+    const fila = { Fecha: fechaExcel(s.fecha), Hora: horaExcel(s.fecha), 'Día': `${tipoDe(s).nombre || ''}${s.titulo && s.titulo !== tipoDe(s).nombre ? ' · ' + s.titulo : ''}` };
+    cols.forEach(([k, et]) => {
+      const as = k === 'dirige' ? asig.filter(a => a.rol === 'voz' && a.dirige)
+        : k === 'voz' ? asig.filter(a => a.rol === 'voz' && !a.dirige) : asig.filter(a => a.rol === k);
+      fila[et] = as.map(a => nombreDe(a.perfil_id)).join(', ');
+    });
+    fila.ID = s.id;
+    return fila;
+  });
+  const wb = X.utils.book_new();
+  const ws = X.utils.json_to_sheet(filas, { header: ['Fecha', 'Hora', 'Día', ...cols.map(c => c[1]), 'ID'] });
+  ws['!cols'] = [{ wch: 11 }, { wch: 6 }, { wch: 22 }, ...cols.map(() => ({ wch: 22 })), { wch: 10, hidden: true }];
+  X.utils.book_append_sheet(wb, ws, 'Asignaciones');
+  const gente = aprobados().sort((a, b) => a.nombre.localeCompare(b.nombre))
+    .map(p => ({ Nombre: p.nombre, Instrumento: INSTRUMENTOS[p.instrumento] || '' }));
+  const ws2 = X.utils.json_to_sheet(gente);
+  ws2['!cols'] = [{ wch: 28 }, { wch: 20 }];
+  X.utils.book_append_sheet(wb, ws2, 'Integrantes');
+  X.writeFile(wb, `asignaciones_${mes}.xlsx`);
+  toast('Excel descargado');
+}
+
+// Convierte la celda "Fecha" (texto dd/mm/aaaa, fecha de Excel o número) a aaaa-mm-dd
+function leerFechaExcel(v, X) {
+  if (v instanceof Date) return claveDia(v);
+  if (typeof v === 'number') { const d = X.SSF.parse_date_code(v); return d ? `${d.y}-${dosDig(d.m)}-${dosDig(d.d)}` : null; }
+  const t = String(v || '').trim();
+  let m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(t);
+  if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${dosDig(m[2])}-${dosDig(m[1])}`;
+  m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  return m ? `${m[1]}-${dosDig(m[2])}-${dosDig(m[3])}` : null;
+}
+
+async function importarExcel(file, mes, data) {
+  let X;
+  try { X = await cargarXLSX(); } catch (e) { return toast(e.message, true); }
+  let filas;
+  try {
+    const wb = X.read(await file.arrayBuffer());   // sin cellDates: evita corrimientos por zona horaria
+    filas = X.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: true });
+  } catch { return toast('No pude leer el archivo. ¿Es un Excel válido?', true); }
+  if (!filas.length) return toast('El archivo no tiene filas', true);
+
+  // Columnas → roles
+  const porEtiqueta = new Map(COLS_EXCEL().flatMap(([k, et]) => [[normalizar(et), k], [normalizar(k), k]]));
+  porEtiqueta.set('voz principal', 'voz'); porEtiqueta.set('coros', 'voz'); porEtiqueta.set('percusion', 'percusion');
+  const encabezados = Object.keys(filas[0]);
+  const colRol = encabezados.map(h => [h, porEtiqueta.get(normalizar(h).trim())]).filter(([, k]) => k);
+  if (!colRol.length) return toast('No encontré columnas de roles (Dirige, Voz, Piano…). Usa el Excel exportado como plantilla.', true);
+  const colFecha = encabezados.find(h => normalizar(h).trim() === 'fecha');
+  const colHora = encabezados.find(h => normalizar(h).trim() === 'hora');
+  const colId = encabezados.find(h => normalizar(h).trim() === 'id');
+
+  // Nombres → integrantes (nombre completo, "Nombre A.", o solo el nombre si es único)
+  const idx = new Map(), primeros = new Map();
+  aprobados().forEach(p => {
+    idx.set(normalizar(p.nombre).trim(), p.id);
+    idx.set(normalizar(nombreCorto(p.id)).trim(), p.id);
+    const pri = normalizar(p.nombre).trim().split(/\s+/)[0];
+    primeros.set(pri, primeros.has(pri) ? null : p.id);
+  });
+  const buscar = n => { const k = normalizar(n).replace(/\s+/g, ' ').trim(); return idx.get(k) || primeros.get(k) || null; };
+
+  const plan = [], noDias = [], noNombres = new Set();
+  const usados = new Set();
+  filas.forEach((f, n) => {
+    let s = colId && data.find(x => x.id === String(f[colId]).trim());
+    if (!s && colFecha) {
+      const dia = leerFechaExcel(f[colFecha], X);
+      const cand = data.filter(x => claveDia(new Date(x.fecha)) === dia);
+      const hv = colHora ? f[colHora] : '';
+      const hora = typeof hv === 'number'   // Excel guarda la hora como fracción del día
+        ? `${dosDig(Math.floor(((hv % 1) * 1440 + 0.5) / 60))}:${dosDig(Math.round((hv % 1) * 1440) % 60)}`
+        : String(hv).trim().padStart(5, '0');
+      s = cand.length > 1 && hora ? cand.find(x => horaExcel(x.fecha) === hora) || cand[0] : cand[0];
+    }
+    const vacia = colRol.every(([h]) => !String(f[h]).trim());
+    if (!s) { if (!vacia || (colFecha && String(f[colFecha]).trim())) noDias.push((colFecha && (leerFechaExcel(f[colFecha], X) || String(f[colFecha]))) || `fila ${n + 2}`); return; }
+    if (usados.has(s.id)) return;
+    usados.add(s.id);
+    const quiero = new Map();   // perfil|rol -> dirige
+    colRol.forEach(([h, k]) => String(f[h]).split(/[,;\n\/]|\s+y\s+/i).map(x => x.trim()).filter(Boolean).forEach(nom => {
+      const pid = buscar(nom);
+      if (!pid) { noNombres.add(nom); return; }
+      const rol = k === 'dirige' ? 'voz' : k;
+      const clave = pid + '|' + rol;
+      quiero.set(clave, (quiero.get(clave) || false) || k === 'dirige');
+    }));
+    plan.push({ s, quiero });
+  });
+  if (!plan.length) return toast('Ninguna fila coincide con los días de este mes', true);
+
+  const total = plan.reduce((t, p) => t + p.quiero.size, 0);
+  const body = abrirModal('Importar asignaciones', `
+    <p style="margin-top:0">Se van a <b>reemplazar</b> las asignaciones de <b>${plan.length}</b> día(s) de ${esc(nombreMes(mes))} con <b>${total}</b> asignación(es) del archivo.</p>
+    <p class="ayuda">Quien ya estaba asignado al mismo rol conserva su confirmación ✅/❌.</p>
+    ${noNombres.size ? `<div class="card" style="border-color:var(--peligro);font-size:14px">⚠️ No reconozco estos nombres (se ignoran): <b>${[...noNombres].map(esc).join(', ')}</b><br><small>Escríbelos como en la hoja <i>Integrantes</i>.</small></div>` : ''}
+    ${noDias.length ? `<div class="card" style="border-color:var(--peligro);font-size:14px">⚠️ Filas sin día en la agenda (se ignoran): ${noDias.map(esc).join(', ')}</div>` : ''}
+    ${data.length > plan.length ? `<p class="ayuda">${data.length - plan.length} día(s) del mes no están en el archivo y quedan igual.</p>` : ''}
+    <button class="btn prim blk" id="bImp">Reemplazar asignaciones</button>
+    <button class="btn blk" data-cerrar>Cancelar</button>`);
+  $('#bImp', body).onclick = e => ocupado(e.currentTarget, async () => {
+    const borrar = [], insertar = [], cambiar = [];
+    plan.forEach(({ s, quiero }) => {
+      const actuales = s.asignaciones || [];
+      actuales.forEach(a => {
+        const clave = a.perfil_id + '|' + a.rol;
+        if (!quiero.has(clave)) borrar.push(a.id);
+        else if (!st.faltaV4 && !!a.dirige !== quiero.get(clave)) cambiar.push({ id: a.id, dirige: quiero.get(clave) });
+      });
+      quiero.forEach((dirige, clave) => {
+        const [perfil_id, rol] = clave.split('|');
+        if (!actuales.some(a => a.perfil_id === perfil_id && a.rol === rol))
+          insertar.push({ setlist_id: s.id, perfil_id, rol, ...(st.faltaV4 ? {} : { dirige }) });
+      });
+    });
+    for (let i = 0; i < borrar.length; i += 100) {
+      const { error } = await sb.from('asignaciones').delete().in('id', borrar.slice(i, i + 100));
+      if (error) return fallo(error, 'Importar');
+    }
+    if (insertar.length) { const { error } = await sb.from('asignaciones').insert(insertar); if (error) return fallo(error, 'Importar'); }
+    for (const c of cambiar) { const { error } = await sb.from('asignaciones').update({ dirige: c.dirige }).eq('id', c.id); if (error) return fallo(error, 'Importar'); }
+    cerrarModal();
+    toast(`Importado: ${insertar.length} nuevas, ${borrar.length} quitadas`);
+    rutear();
+  });
+}
+
 // ---------- vista: un día ----------
 async function vistaDia(ctx) {
   cargando('Día', { atras: '#/agenda' });
   const [rs, ri, rv] = await Promise.all([
     conCache('dia:' + ctx.id, sb.from('setlists').select(st.faltaV2 ? '*' : selDia()).eq('id', ctx.id).maybeSingle()),
-    conCache('items:' + ctx.id, sb.from('setlist_items').select(SEL_ITEMS).eq('setlist_id', ctx.id).order('orden')),
+    conCache('items:' + ctx.id, sb.from('setlist_items').select(selItems()).eq('setlist_id', ctx.id).order('orden')),
     st.faltaV2 ? Promise.resolve({ data: null }) : sb.from('en_vivo').select('*').eq('setlist_id', ctx.id).maybeSingle(),
   ]);
   if (!ctx.vigente()) return;
@@ -1779,6 +1968,13 @@ async function vistaDia(ctx) {
   if (!s) { app.innerHTML = encabezado('Día', { atras: '#/agenda' }) + '<div class="vacio">Este día ya no existe.</div>'; return; }
   s.asignaciones ??= [];
   const items = ri.data.filter(i => i.cancion);
+  // Si el orden no respeta rápidas → lentas (p. ej. cambió el ritmo de una canción), se corrige solo
+  if (esAdmin() && navigator.onLine && hayRitmo(items) &&
+      items.some((it, k) => k && ORDEN_RITMO[ritmoDe(it)] < ORDEN_RITMO[ritmoDe(items[k - 1])])) {
+    if (await ordenarPorRitmo(s.id)) { if (ctx.vigente()) rutear(); return; }
+  }
+  const conRitmo = hayRitmo(items);
+  const mismoGrupo = (a, b) => !conRitmo || (a && b && ritmoDe(a) === ritmoDe(b));
   const vivo = rv.data?.activo ? rv.data : null;
   const t = tipoDe(s);
   const mios = misRoles(s);
@@ -1817,15 +2013,16 @@ async function vistaDia(ctx) {
       <span>🎵 Repertorio (${items.length})</span>
     </div>
     <div class="lista">
-      ${items.map((it, i) => `
+      ${items.map((it, i) => `${conRitmo && (i === 0 || ritmoDe(items[i - 1]) !== ritmoDe(it))
+        ? `<div class="sub-rep r-${ritmoDe(it) || 'nd'}">${RITMOS_PL[ritmoDe(it)]} <small>(${items.filter(x => ritmoDe(x) === ritmoDe(it)).length})</small></div>` : ''}
       <div class="item set-item ${vivo && vivo.indice === i ? 'en-vivo' : ''}" data-acc="abrir" data-i="${i}">
         <span class="num">${i + 1}</span>
         <div class="info"><b>${esc(it.cancion.titulo)}</b><small>${it.cantante_id ? '🎤 ' + esc(nombreDe(it.cantante_id)) : 'Sin cantante asignado'}${it.notas ? ' · ' + esc(it.notas) : ''}</small></div>
         <span class="tono-pill">${esc(tonoTxt(it.tono || it.cancion.tono_original))}</span>
         ${esAdmin() ? `<div class="orden">
-          <button data-acc="subir" data-i="${i}" aria-label="Subir" ${i === 0 ? 'disabled' : ''}>▲</button>
+          <button data-acc="subir" data-i="${i}" aria-label="Subir" ${i === 0 || !mismoGrupo(it, items[i - 1]) ? 'disabled' : ''}>▲</button>
           <button data-acc="item" data-i="${i}" aria-label="Editar">✏️</button>
-          <button data-acc="bajar" data-i="${i}" aria-label="Bajar" ${i === items.length - 1 ? 'disabled' : ''}>▼</button>
+          <button data-acc="bajar" data-i="${i}" aria-label="Bajar" ${i === items.length - 1 || !mismoGrupo(it, items[i + 1]) ? 'disabled' : ''}>▼</button>
         </div>` : ''}
       </div>`).join('') || `<div class="vacio"><span class="grande">🎶</span>Todavía no hay canciones asignadas.</div>`}
     </div>
@@ -2000,7 +2197,7 @@ function modalPublicarDia(s) {
 
 async function modalItem(s, items, it) {
   const [rc, rt] = await Promise.all([
-    sb.from('canciones').select('id, titulo, artista, tono_original').order('titulo'),
+    sb.from('canciones').select(st.faltaV6 ? 'id, titulo, artista, tono_original' : 'id, titulo, artista, tono_original, ritmo').order('titulo'),
     sb.from('tonos_cantante').select('cancion_id, cantante_id, tono'),
   ]);
   if (rc.error || rt.error) return fallo(rc.error || rt.error, 'Canciones');
@@ -2014,13 +2211,15 @@ async function modalItem(s, items, it) {
     <form id="fItem">
       <label>Canción</label>
       <select name="cancion_id" required>${it ? '' : '<option value="">Elige…</option>'}${canciones.map(c =>
-        `<option value="${c.id}" ${c.id === it?.cancion_id ? 'selected' : ''}>${esc(c.titulo)}${c.artista ? ' — ' + esc(c.artista) : ''}</option>`).join('')}</select>
+        `<option value="${c.id}" ${c.id === it?.cancion_id ? 'selected' : ''}>${ICON_RITMO[c.ritmo] ? ICON_RITMO[c.ritmo] + ' ' : ''}${esc(c.titulo)}${c.artista ? ' — ' + esc(c.artista) : ''}</option>`).join('')}</select>
       <div class="fila">
         <div><label>Cantante</label><select name="cantante_id"><option value="">Sin asignar</option>${lista.map(p =>
           `<option value="${p.id}" ${p.id === it?.cantante_id ? 'selected' : ''}>${delDia.has(p.id) ? '★ ' : ''}${esc(p.nombre)}</option>`).join('')}</select></div>
         <div><label>Tono</label><select name="tono">${opcionesTono(it?.tono || '', TODOS_LOS_TONOS, 'Original')}</select></div>
       </div>
       <p class="ayuda" id="ayudaTono"></p>
+      ${st.faltaV6 ? '' : `<label>Ritmo en este día</label><select name="ritmo"><option value="">Según la canción</option>${Object.entries(RITMOS).map(([k, v]) =>
+        `<option value="${k}" ${it?.ritmo === k ? 'selected' : ''}>${v}</option>`).join('')}</select>`}
       <label>Nota (opcional)</label><input name="notas" maxlength="200" value="${esc(it?.notas)}" placeholder="Ej: solo coro, versión corta">
       <label class="check"><input type="checkbox" name="recordar" checked> Guardar este tono para el cantante</label>
       <button class="btn prim blk" type="submit">${it ? 'Guardar' : 'Agregar'}</button>
@@ -2035,6 +2234,8 @@ async function modalItem(s, items, it) {
     $('#ayudaTono', body).textContent = c
       ? `Original: ${tonoTxt(c.tono_original)}${guardado ? ` · ${nombreDe(form.cantante_id.value)} la canta en ${tonoTxt(guardado)}` : ''}`
       : '';
+    const optR = form.ritmo?.querySelector('option[value=""]');
+    if (optR) optR.textContent = `Según la canción${c?.ritmo ? ` (${RITMOS[c.ritmo]})` : ' (sin definir)'}`;
   };
   form.cancion_id.onchange = sugerir;
   form.cantante_id.onchange = sugerir;
@@ -2050,7 +2251,9 @@ async function modalItem(s, items, it) {
     e.preventDefault();
     ocupado(form.querySelector('[type=submit]'), async () => {
       const f = Object.fromEntries(new FormData(form));
-      const datos = { cancion_id: f.cancion_id, cantante_id: f.cantante_id || null, tono: f.tono || null, notas: f.notas.trim() || null };
+      const can = canciones.find(x => x.id === f.cancion_id);
+      const datos = { cancion_id: f.cancion_id, cantante_id: f.cantante_id || null, tono: f.tono || null, notas: f.notas.trim() || null,
+        ...(st.faltaV6 ? {} : { ritmo: f.ritmo && f.ritmo !== can?.ritmo ? f.ritmo : null }) };
       const { error } = it
         ? await sb.from('setlist_items').update(datos).eq('id', it.id)
         : await sb.from('setlist_items').insert({ ...datos, setlist_id: s.id, orden: items.length ? Math.max(...items.map(x => x.orden)) + 1 : 0 });
@@ -2060,6 +2263,7 @@ async function modalItem(s, items, it) {
           .upsert({ cancion_id: datos.cancion_id, cantante_id: datos.cantante_id, tono: datos.tono }, { onConflict: 'cancion_id,cantante_id' });
         if (e2) fallo(e2, 'Tono');
       }
+      await ordenarPorRitmo(s.id);
       cerrarModal(); toast(it ? 'Actualizado' : 'Canción agregada'); rutear();
     });
   };
@@ -2083,7 +2287,10 @@ async function compartirDia(s, items) {
     s.lugar ? `📍 ${s.lugar}` : null,
     canto.length ? `\n🎤 *Cantores*\n${canto.join('\n')}` : null,
     instr.length ? `\n🎸 *Instrumentistas*\n${instr.join('\n')}` : null,
-    items.length ? `\n🎵 *Canciones*\n${items.map((it, i) => `${i + 1}. ${it.cancion.titulo} — ${tonoTxt(it.tono || it.cancion.tono_original)}${it.cantante_id ? ` (${nombreDe(it.cantante_id)})` : ''}`).join('\n')}` : null,
+    items.length ? `\n🎵 *Canciones*\n${items.map((it, i) => {
+      const r = ritmoDe(it), cab = hayRitmo(items) && (i === 0 || ritmoDe(items[i - 1]) !== r) ? `_${RITMOS_PL[r]}_\n` : '';
+      return `${cab}${i + 1}. ${it.cancion.titulo} — ${tonoTxt(it.tono || it.cancion.tono_original)}${it.cantante_id ? ` (${nombreDe(it.cantante_id)})` : ''}`;
+    }).join('\n')}` : null,
     s.notas ? `\n📝 ${s.notas}` : null,
     `\n${baseUrl()}#/dia/${s.id}`,
   ].filter(x => x !== null).join('\n');
@@ -2194,7 +2401,7 @@ async function descargarSinConexion(btn) {
     await idb.set(k('proximos'), rs.data);
     const ids = rs.data.map(s => s.id);
     if (ids.length) {
-      const { data: its, error } = await sb.from('setlist_items').select(SEL_ITEMS).in('setlist_id', ids).order('orden');
+      const { data: its, error } = await sb.from('setlist_items').select(selItems()).in('setlist_id', ids).order('orden');
       if (error) throw error;
       const pi = por(its, 'setlist_id');
       for (const s of rs.data) { await idb.set(k('dia:' + s.id), s); await idb.set(k('items:' + s.id), pi[s.id] || []); }
