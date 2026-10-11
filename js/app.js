@@ -2336,7 +2336,9 @@ async function vistaEquipo(ctx) {
       <div class="lista">${grupos[k].map(filaMiembro).join('')}</div>`).join('')}
     ${esAdmin() && bloq.length ? `<div class="seccion-t">Desactivados</div><div class="lista">${bloq.map(p => `
       <div class="item" style="cursor:default"><div class="info"><b>${esc(p.nombre)}</b><small>${esc(p.email || '')}</small></div>
-      <button class="btn sm" data-acc="aprobar" data-id="${p.id}">Reactivar</button></div>`).join('')}</div>` : ''}`;
+      <button class="btn sm" data-acc="aprobar" data-id="${p.id}">Reactivar</button></div>`).join('')}</div>` : ''}
+    ${esAdmin() ? '<div class="seccion-t">🖥️ Link de solo lectura</div><div class="card" id="accesoPub"><p class="ayuda" style="margin:0">Cargando…</p></div>' : ''}`;
+  if (esAdmin()) pintarAccesoPublico(ctx);
 
   const actualizar = async (id, cambios, msg) => {
     const { error } = await sb.from('profiles').update(cambios).eq('id', id);
@@ -2359,6 +2361,55 @@ async function vistaEquipo(ctx) {
       $('#mGuardar', body).onclick = () => actualizar(p.id, { instrumento: $('#mInstr', body).value }, 'Guardado');
       $('#mAdmin', body).onclick = () => actualizar(p.id, { rol: p.rol === 'admin' ? 'miembro' : 'admin' }, 'Rol actualizado');
       $('#mBloq', body).onclick = () => confirm(`¿Desactivar a ${p.nombre}?`) && actualizar(p.id, { estado: 'bloqueado' }, 'Desactivado');
+    }
+  };
+}
+
+// ---------- link público de solo lectura (programa.html?k=…) ----------
+async function pintarAccesoPublico(ctx) {
+  const caja = $('#accesoPub');
+  const { data, error } = await sb.from('acceso_publico').select('*').eq('id', 1).maybeSingle();
+  if (!ctx.vigente() || !caja) return;
+  if (error || !data) {
+    caja.innerHTML = '<p class="ayuda" style="margin:0">⚠️ Para activarlo ejecuta <b>supabase/007_programa_publico.sql</b> en Supabase → SQL Editor.</p>';
+    return;
+  }
+  const link = `${baseUrl().replace(/index\.html$/, "")}programa.html?k=${data.token}`;
+  caja.innerHTML = `
+    <p class="ayuda" style="margin-top:0">Para equipos que solo necesitan ver el programa (p. ej. Proper Center): días, quién canta y canciones con autor, video y letra sin acordes. No necesitan cuenta.</p>
+    <p style="margin:6px 0">Estado: <b style="color:var(--${data.activo ? 'ok' : 'peligro'})">${data.activo ? '✅ Activo' : '⛔ Desactivado'}</b></p>
+    ${data.activo ? `<input readonly value="${esc(link)}" onclick="this.select()" style="font-size:12px">
+    <div class="fila" style="margin-top:8px">
+      <button class="btn sm prim" data-pub="copiar">📋 Copiar link</button>
+      <button class="btn sm" data-pub="compartir">📤 Compartir</button>
+      <a class="btn sm" href="${esc(link)}" target="_blank" rel="noopener">👁️ Ver</a>
+    </div>` : ''}
+    <div class="fila" style="margin-top:8px">
+      <button class="btn sm" data-pub="regenerar">🔄 Cambiar link</button>
+      <button class="btn sm ${data.activo ? 'peligro' : ''}" data-pub="activo">${data.activo ? '⛔ Desactivar' : '✅ Activar'}</button>
+    </div>
+    <p class="ayuda" style="margin-bottom:0">"Cambiar link" invalida el anterior: úsalo si el link llegó a quien no debía.</p>`;
+  caja.onclick = async e => {
+    const b = e.target.closest('[data-pub]');
+    if (!b) return;
+    e.stopPropagation();
+    const acc = b.dataset.pub;
+    if (acc === 'copiar') {
+      try { await navigator.clipboard.writeText(link); toast('Link copiado'); } catch { toast('No se pudo copiar', true); }
+    } else if (acc === 'compartir') {
+      const txt = `📅 Programa de Alabanza · Roca de Vida\nDías, quién canta y canciones (con video y letra):\n${link}`;
+      if (navigator.share) { try { await navigator.share({ text: txt }); } catch {} }
+      else window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank', 'noopener');
+    } else if (acc === 'regenerar') {
+      if (!confirm('El link actual dejará de funcionar y tendrás que enviar el nuevo. ¿Continuar?')) return;
+      const nuevo = [...crypto.getRandomValues(new Uint8Array(24))].map(x => x.toString(16).padStart(2, '0')).join('');
+      const { error: er } = await sb.from('acceso_publico').update({ token: nuevo, updated_at: new Date().toISOString() }).eq('id', 1);
+      if (er) return fallo(er, 'Link');
+      toast('Link nuevo creado'); pintarAccesoPublico(ctx);
+    } else if (acc === 'activo') {
+      const { error: er } = await sb.from('acceso_publico').update({ activo: !data.activo, updated_at: new Date().toISOString() }).eq('id', 1);
+      if (er) return fallo(er, 'Link');
+      toast(data.activo ? 'Link desactivado' : 'Link activado'); pintarAccesoPublico(ctx);
     }
   };
 }

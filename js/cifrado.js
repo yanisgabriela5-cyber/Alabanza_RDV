@@ -20,7 +20,7 @@ const POR_FILA = 4;
 const RE_SECCION_SUELTA = /^\(?\s*(intro|introducci[oó]n|verso|estrofa|pre-?coro|precoro|coro|estribillo|puente|interludio|instrumental|final|outro|tag|vamp|solo)(\s*\d+)?\s*\)?\s*(x\s*\d+)?\s*$/i;
 const normalizar = s => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/\s*\d+\s*$/, '').replace(/\s*x\s*\d+$/, '').trim();
 
-function seccionDe(linea) {
+export function seccionDe(linea) {
   const t = linea.trim();
   if (!t) return null;
   const sec = etiquetaSeccion(t);
