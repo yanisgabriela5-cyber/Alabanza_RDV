@@ -2763,11 +2763,12 @@ const fmtDiaK = k => new Date(k + 'T00:00').toLocaleDateString('es-PA', { weekda
 const fmtRango = (d, h) => (d === h ? fmtDiaK(d) : `${fmtDiaK(d)} → ${fmtDiaK(h)}`);
 
 async function pintarIndisp() {
-  const box = $('#cardIndisp');
+  let box = $('#cardIndisp');
   if (!box) return;
   const hoyK = claveDia(new Date());
   const { data, error } = await sb.from('indisponibilidad').select('*').eq('perfil_id', st.uid).gte('hasta', hoyK).order('desde');
-  if (!$('#cardIndisp')) return;
+  box = $('#cardIndisp');
+  if (!box) return;
   if (error) {
     box.innerHTML = esErrorRed(error) || !esAdmin() ? ''
       : '<div class="card" style="border-color:var(--peligro)">⚠️ Para activar menciones, fechas no disponibles y notificaciones ejecuta <b>supabase/007_menciones_push.sql</b> en Supabase → SQL Editor.</div>';
@@ -2785,7 +2786,8 @@ async function pintarIndisp() {
       <label>Motivo (opcional)</label><input name="motivo" maxlength="120" placeholder="Viaje, trabajo…">
       <button class="btn prim blk" style="margin-top:12px">Agregar fechas</button>
     </form></div>`;
-  const f = $('#fIndisp');
+  const f = box.querySelector('#fIndisp');
+  if (!f) return;
   f.desde.onchange = () => { f.hasta.min = f.desde.value; if (!f.hasta.value || f.hasta.value < f.desde.value) f.hasta.value = f.desde.value; };
   f.onsubmit = e => {
     e.preventDefault();
