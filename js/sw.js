@@ -1,8 +1,9 @@
-// Service worker: permite instalar la app y abrirla sin conexión.
+// Service worker: permite instalar la app, abrirla sin conexión y recibir notificaciones.
 // - Archivos de la app: red primero (siempre la última versión), copia en caché como respaldo.
 // - Imágenes y partituras de Supabase Storage: caché primero (no cambian), red si no están.
 // - Datos de Supabase (REST): no se tocan; la app guarda su propia copia (IndexedDB).
-const CACHE = 'alabanza-v9';
+// IMPORTANTE: este archivo va en la RAÍZ del repo (junto a index.html) para que funcionen las notificaciones.
+const CACHE = 'alabanza-v10';
 const ARCHIVOS = 'alabanza-archivos';
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'js/app.js', 'js/acordes.js', 'js/cifrado.js', 'js/config.js',
@@ -10,7 +11,8 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // Si falta algún archivo no se cancela la instalación
+  e.waitUntil(caches.open(CACHE).then(c => Promise.allSettled(SHELL.map(u => c.add(u)))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -47,4 +49,29 @@ self.addEventListener('fetch', e => {
       })
       .catch(() => caches.match(req).then(r => r || (req.mode === 'navigate' ? caches.match('index.html') : undefined)))
   );
+});
+
+// ---------- notificaciones push ----------
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Alabanza RDV', {
+    body: d.body || '',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/favicon-32.png',
+    tag: d.tag,
+    renotify: !!d.tag,
+    vibrate: [80, 40, 80],
+    data: { url: d.url || './' },
+  }));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const destino = new URL(e.notification.data?.url || './', self.registration.scope).href;
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(lista => {
+    const abierta = lista.find(c => c.url.startsWith(self.registration.scope));
+    if (abierta) return abierta.focus().then(c => (c.navigate ? c.navigate(destino) : c));
+    return clients.openWindow(destino);
+  }));
 });
