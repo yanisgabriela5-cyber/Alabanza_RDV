@@ -4,6 +4,10 @@
 export const SUPABASE_URL = 'https://xkzdtxughatqjoumrfgi.supabase.co';
 export const SUPABASE_KEY = 'sb_publishable_USQw2RbfDXBQ9vtC8Qt9NA_-079SlOi';
 
+// Notificaciones push: clave PÚBLICA VAPID (la privada va solo en Supabase → Edge Functions → Secrets).
+// Se genera con:  npx web-push generate-vapid-keys
+export const VAPID_PUBLIC_KEY = '';
+
 export const APP_NOMBRE = 'Roca de Vida · Alabanza';
 
 export const INSTRUMENTOS = {

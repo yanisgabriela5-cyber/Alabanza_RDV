@@ -1,5 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
-import { SUPABASE_URL, SUPABASE_KEY, APP_NOMBRE, INSTRUMENTOS, NOTAS_TABS, REACCIONES, ROLES, ROLES_CANTO, ICON_INSTR } from './config.js';
+import { SUPABASE_URL, SUPABASE_KEY, APP_NOMBRE, INSTRUMENTOS, NOTAS_TABS, REACCIONES, ROLES, ROLES_CANTO, ICON_INSTR, VAPID_PUBLIC_KEY } from './config.js';
 import {
   TONOS_MAYORES, TONOS_MENORES, TODOS_LOS_TONOS, parseTono, usaBemoles, distancia,
   transponerTono, renderLetra, primerAcorde, cifrado, esAcorde, acordesDelTono, aCorchetes,
@@ -25,6 +25,11 @@ const st = {
   faltaV4: false,       // true si falta ejecutar 004_voz_dirige_chat.sql
   faltaV6: false,       // true si falta ejecutar 006_ritmo.sql
   seguirVivo: true,     // seguir al líder en modo en vivo
+  faltaV7: false,       // true si falta ejecutar 007_menciones_push.sql
+  menNoLeidas: 0,       // menciones sin leer
+  canalGlobal: null,    // canal de tiempo real de mis menciones
+  historial: null,      // cancion_id -> { ultima_vez, veces_90d, veces_total }
+  historialT: 0,
 };
 
 const LS = 'alabanza.ajustes';
@@ -170,6 +175,7 @@ function encabezado(titulo, { sub = '', atras = null, derecha = '' } = {}) {
     ? `<button class="atras" data-atras="${esc(atras)}" aria-label="Volver">‹</button>`
     : `<img src="icons/logo.png" alt="">`;
   return `<header class="top">${izq}<h1>${esc(titulo)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h1>${derecha}
+    <button type="button" class="campana" data-men aria-label="Menciones">🔔<b class="men-badge"${st.menNoLeidas ? '' : ' hidden'}>${st.menNoLeidas > 9 ? '9+' : st.menNoLeidas}</b></button>
     <a class="avatar" href="#/perfil" title="Mi perfil">${esc(iniciales(st.perfil?.nombre))}</a></header>`;
 }
 
@@ -199,6 +205,7 @@ async function arrancar(session) {
   st.limpiar.forEach(f => f()); st.limpiar = [];
   if (!session) {
     st.perfil = null;
+    if (st.canalGlobal) { sb.removeChannel(st.canalGlobal); st.canalGlobal = null; }
     $('#nav').hidden = true;
     return vistaAuth();
   }
@@ -211,6 +218,7 @@ async function arrancar(session) {
   st.perfil = perfil;
   if (!perfil || perfil.estado !== 'aprobado') { $('#nav').hidden = true; return vistaPendiente(); }
   await Promise.all([cargarPerfiles(), cargarTipos()]);
+  iniciarGlobal();
   $('#nav').hidden = false;
   if (!location.hash || location.hash === '#' || location.hash === '#/') location.replace('#/muro');
   else rutear();
@@ -613,27 +621,30 @@ async function vistaCanciones(ctx) {
   const filtro = ctx.q.get('b') || '';
   const partes = {};   // cancion_id -> Set(instrumentos con partitura)
   (rpart.data || []).forEach(p => (partes[p.cancion_id] ??= new Set()).add(p.instrumento));
-  let soloPart = false, filtroRitmo = '';
+  let soloPart = false, filtroRitmo = '', soloOlv = false, hist = st.historial || new Map();
+  const usadaHace = (id, n) => { const d = haceDias(hist.get(id)?.ultima_vez); return d != null && d < n; };
   app.innerHTML = encabezado('Canciones', { sub: `${data.length} en el repertorio` }) + `
     <div class="buscador"><input id="busca" type="search" placeholder="Buscar por título o artista" value="${esc(filtro)}"></div>
-    <div class="segmentado" id="segPart"><button data-p="0" class="activo">Todas</button>${st.faltaV6 ? '' : '<button data-p="rapida">⚡ Rápidas</button><button data-p="lenta">🕊️ Lentas</button>'}<button data-p="1">📄 Partitura</button></div>
+    <div class="segmentado" id="segPart"><button data-p="0" class="activo">Todas</button>${st.faltaV6 ? '' : '<button data-p="rapida">⚡ Rápidas</button><button data-p="lenta">🕊️ Lentas</button>'}<button data-p="olv">💤 Sin usar</button><button data-p="1">📄 Partitura</button></div>
     <div class="lista" id="lista"></div>
     ${esAdmin() ? `<button class="fab" data-acc="nueva" aria-label="Nueva canción">+</button>` : ''}`;
   const pintar = () => {
     const q = normalizar($('#busca').value);
-    const res = data.filter(c => (!q || normalizar(c.titulo + ' ' + (c.artista || '')).includes(q)) && (!soloPart || partes[c.id]) && (!filtroRitmo || c.ritmo === filtroRitmo));
+    const res = data.filter(c => (!q || normalizar(c.titulo + ' ' + (c.artista || '')).includes(q)) && (!soloPart || partes[c.id]) && (!filtroRitmo || c.ritmo === filtroRitmo) && (!soloOlv || !usadaHace(c.id, 90)));
+    if (soloOlv) res.sort((a, b) => (hist.get(a.id)?.ultima_vez || '').localeCompare(hist.get(b.id)?.ultima_vez || ''));
     $('#lista').innerHTML = res.map(c => `
       <a class="item" href="#/cancion/${c.id}">
-        <div class="info"><b>${ICON_RITMO[c.ritmo] ? `<span title="${esc(RITMOS[c.ritmo])}">${ICON_RITMO[c.ritmo]}</span> ` : ''}${esc(c.titulo)}</b><small>${esc(c.artista || 'Sin artista')}${partes[c.id] ? ' · 📄 ' + [...partes[c.id]].map(i => ICON_INSTR[i] || '📄').join('') : ''}</small></div>
+        <div class="info"><b>${ICON_RITMO[c.ritmo] ? `<span title="${esc(RITMOS[c.ritmo])}">${ICON_RITMO[c.ritmo]}</span> ` : ''}${esc(c.titulo)}</b><small>${esc(c.artista || 'Sin artista')}${partes[c.id] ? ' · 📄 ' + [...partes[c.id]].map(i => ICON_INSTR[i] || '📄').join('') : ''}${hist.size ? ` · <span class="uso ${frescura(hist.get(c.id))}">🕒 ${esc(txtUltima(hist.get(c.id)?.ultima_vez))}</span>` : ''}</small></div>
         <span class="tono-pill">${esc(tonoTxt(c.tono_original))}</span>
       </a>`).join('') || `<div class="vacio"><span class="grande">🎵</span>${data.length ? 'Sin resultados.' : 'Aún no hay canciones.'}${!data.length && esAdmin() ? '<br>Toca <b>+</b> para agregar la primera.' : ''}</div>`;
   };
   pintar();
+  cargarHistorial().then(h => { hist = h; if (ctx.vigente() && $('#lista')) pintar(); });
   app.oninput = e => { if (e.target.id === 'busca') { pintar(); history.replaceState(null, '', '#/canciones' + (e.target.value ? '?b=' + encodeURIComponent(e.target.value) : '')); } };
   app.onclick = e => {
     if (e.target.closest('[data-acc=nueva]')) return modalCancion(null);
     const b = e.target.closest('[data-p]');
-    if (b) { soloPart = b.dataset.p === '1'; filtroRitmo = RITMOS[b.dataset.p] ? b.dataset.p : ''; $('#segPart').querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b)); pintar(); }
+    if (b) { soloPart = b.dataset.p === '1'; soloOlv = b.dataset.p === 'olv'; filtroRitmo = RITMOS[b.dataset.p] ? b.dataset.p : ''; $('#segPart').querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b)); pintar(); }
   };
 }
 
@@ -832,6 +843,8 @@ async function vistaCancion(ctx) {
   if (!ctx.vigente()) return;
   const err = rc.error || rn.error || rt.error || rs.error;
   if (err) return fallo(err, 'Canción');
+  const usoC = (await cargarHistorial()).get(id);
+  if (!ctx.vigente()) return;
   const c = rc.data;
   if (!c) { app.innerHTML = encabezado('Canción', { atras: '#/canciones' }) + '<div class="vacio">Esta canción ya no existe.</div>'; return; }
 
@@ -867,6 +880,7 @@ async function vistaCancion(ctx) {
       original ? `<span class="tag">Original: ${esc(tonoTxt(original))}</span>` : '',
       c.bpm ? `<span class="tag">${c.bpm} BPM</span>` : '',
       c.compas ? `<span class="tag">${esc(c.compas)}</span>` : '',
+      usoC ? `<span class="tag uso-tag ${frescura(usoC)}">🕒 ${esc(txtUltima(usoC.ultima_vez))} · ${usoC.veces_90d}× en 3 meses</span>` : '',
       ritmoDe(itemSet) || c.ritmo ? `<span class="tag">${esc(RITMOS[ritmoDe(itemSet) || c.ritmo])}</span>` : '',
       itemSet?.cantante_id ? `<span class="tag ok">🎤 ${esc(nombreDe(itemSet.cantante_id))}</span>` : '',
     ].join('');
@@ -1673,7 +1687,9 @@ function modalTipoForm(t) {
 }
 
 // ---------- modal: asignar equipo ----------
-function modalAsignar(s, rolInicial) {
+async function modalAsignar(s, rolInicial) {
+  const ind = await cargarIndisp(claveDia(new Date(s.fecha)), claveDia(new Date(s.fecha)));
+  const nd = pid => ind.find(i => i.perfil_id === pid);
   let rol = ROLES[rolInicial] ? rolInicial : 'voz';
   let asig = [...(s.asignaciones || [])];
   const relevante = p => p.instrumento === rol;
@@ -1694,8 +1710,8 @@ function modalAsignar(s, rolInicial) {
           const otros = asig.filter(a => a.perfil_id === p.id && a.rol !== rol).map(etiquetaRol).join(', ');
           return `${i === corte && corte > 0 ? '<div class="sep-check">Otros integrantes</div>' : ''}
             <div class="fila-check-wrap">
-            <label class="check fila-check"><input type="checkbox" name="p" value="${p.id}" ${actual ? 'checked' : ''}>
-            <span><b>${esc(p.nombre)}</b> <small>${esc(INSTRUMENTOS[p.instrumento] || '')}${otros ? ' · ya en: ' + esc(otros) : ''}</small></span>
+            <label class="check fila-check${nd(p.id) ? ' no-disp' : ''}"><input type="checkbox" name="p" value="${p.id}" ${actual ? 'checked' : ''}>
+            <span><b>${esc(p.nombre)}</b> <small>${esc(INSTRUMENTOS[p.instrumento] || '')}${otros ? ' · ya en: ' + esc(otros) : ''}</small>${nd(p.id) ? `<small class="nd">🚫 No disponible${nd(p.id).motivo ? ': ' + esc(nd(p.id).motivo) : ''}</small>` : ''}</span>
             ${actual ? `<span title="${actual.estado}">${ICON_ESTADO[actual.estado]}</span>` : ''}</label>
             ${conDirige() ? `<label class="dirige-tg" title="Dirige"><input type="checkbox" name="d" value="${p.id}" ${actual?.dirige ? 'checked' : ''}><span>👑</span></label>` : ''}
             </div>`;
@@ -1753,6 +1769,9 @@ async function vistaPlan(ctx) {
     .gte('fecha', isoSinMs(ini)).lt('fecha', isoSinMs(fin)).order('fecha'));
   if (!ctx.vigente()) return;
   if (error) return fallo(error, 'Planificación');
+  const ind = await cargarIndisp(claveDia(ini), claveDia(new Date(fin - 864e5)));
+  if (!ctx.vigente()) return;
+  const ndDia = s => { const k = claveDia(new Date(s.fecha)); return ind.filter(i => i.desde <= k && i.hasta >= k); };
   const usados = new Set(data.flatMap(s => s.asignaciones.map(a => a.rol)));
   const cols = Object.keys(ROLES).filter(r => r !== 'otro' || usados.has('otro'));
   const conteo = new Map();
@@ -1773,11 +1792,11 @@ async function vistaPlan(ctx) {
       <thead><tr><th>Día</th>${cols.map(c => `<th>${esc(ROLES[c])}</th>`).join('')}<th>🎵</th></tr></thead>
       <tbody>${data.map(s => {
         const t = tipoDe(s);
-        return `<tr><th style="border-left:3px solid ${esc(t.color)}"><a href="#/dia/${s.id}">${esc(t.emoji)} ${fmtCorta(s.fecha)}</a><small>${fmtHora(s.fecha)}</small></th>
+        return `<tr><th style="border-left:3px solid ${esc(t.color)}"><a href="#/dia/${s.id}">${esc(t.emoji)} ${fmtCorta(s.fecha)}</a><small>${fmtHora(s.fecha)}</small>${ndDia(s).length ? `<small class="nd" title="No disponibles">🚫 ${ndDia(s).map(i => esc(nombreCorto(i.perfil_id))).join(', ')}</small>` : ''}</th>
           ${cols.map(c => {
             const as = s.asignaciones.filter(a => a.rol === c);
             return `<td class="${esAdmin() ? 'editable' : ''}" data-acc="celda" data-id="${s.id}" data-rol="${c}">${as.map(a =>
-              `<span class="p ${a.estado}" title="${a.estado}${a.dirige ? ' · dirige' : ''}">${a.dirige ? '👑 ' : ''}${esc(nombreCorto(a.perfil_id))}</span>`).join('') || '<span class="vacio-c">—</span>'}</td>`;
+              `<span class="p ${a.estado}${ndDia(s).some(i => i.perfil_id === a.perfil_id) ? ' choque' : ''}" title="${a.estado}${a.dirige ? ' · dirige' : ''}">${a.dirige ? '👑 ' : ''}${esc(nombreCorto(a.perfil_id))}</span>`).join('') || '<span class="vacio-c">—</span>'}</td>`;
           }).join('')}
           <td>${s.setlist_items.length || '—'}</td></tr>`;
       }).join('')}</tbody></table></div>
@@ -2106,7 +2125,9 @@ function htmlChat() {
     <div class="card chat">
       <div class="chat-lista" id="chatLista"><div class="chat-vacio">Cargando…</div></div>
       <form class="chat-form" id="fChat">
-        <textarea name="texto" maxlength="1000" rows="1" placeholder="Escribe un mensaje…" aria-label="Mensaje"></textarea>
+        <div class="men-sug" id="menSug" hidden></div>
+        <button type="button" class="btn-ico men-at" data-at aria-label="Mencionar a alguien">@</button>
+        <textarea name="texto" maxlength="1000" rows="1" placeholder="Escribe… usa @ para mencionar" aria-label="Mensaje"></textarea>
         <button class="btn prim" type="submit">Enviar</button>
       </form>
     </div>`;
@@ -2122,24 +2143,33 @@ async function iniciarChat(s, ctx) {
   };
   const pintar = (bajar = true) => {
     lista.innerHTML = msgs.length ? msgs.map(m => `
-      <div class="chat-msg ${m.autor_id === st.uid ? 'mio' : ''}">
+      <div class="chat-msg ${m.autor_id === st.uid ? 'mio' : ''}${m._nuevo ? ' nuevo' : ''}${m.autor_id !== st.uid && mencionaA(m.texto, s) ? ' me-nombra' : ''}" data-id="${m.id}">
         ${m.autor_id === st.uid ? '' : `<b>${esc(nombreDe(m.autor_id))}</b>`}
-        <p>${esc(m.texto)}<small>${esc(fmtMsg(m.created_at))}</small>${m.autor_id === st.uid || esAdmin()
+        <p>${textoConMenciones(m.texto, s)}<small>${esc(fmtMsg(m.created_at))}</small>${m.autor_id === st.uid || esAdmin()
           ? `<button class="x" data-msg="${m.id}" aria-label="Borrar mensaje">✕</button>` : ''}</p>
       </div>`).join('') : '<div class="chat-vacio">Sin mensajes. ¡Escribe el primero!</div>';
     if (bajar) lista.scrollTop = lista.scrollHeight;
+    msgs.forEach(m => delete m._nuevo);
   };
   const r = await conCache('chat:' + s.id, sb.from('mensajes_evento').select('*').eq('setlist_id', s.id).order('created_at').limit(300));
   if (!ctx.vigente()) return;
   if (r.error) { lista.innerHTML = '<div class="chat-vacio">No se pudo cargar el chat.</div>'; return; }
   msgs = r.data || [];
   pintar();
+  const irA = ctx.q.get('men');
+  const objetivo = irA && lista.querySelector(`[data-id="${CSS.escape(irA)}"]`);
+  if (objetivo) {
+    lista.scrollTop = objetivo.offsetTop - 40;
+    objetivo.classList.add('destello');
+    setTimeout(() => window.scrollTo({ top: lista.getBoundingClientRect().top + scrollY - 140, behavior: 'smooth' }), 150);
+  }
+  marcarLeidas(s.id);
 
   const canal = sb.channel('chat-' + s.id)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes_evento', filter: `setlist_id=eq.${s.id}` }, ({ new: m }) => {
       if (!ctx.vigente() || msgs.some(x => x.id === m.id)) return;
       const abajo = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 60;
-      msgs.push(m); pintar(abajo || m.autor_id === st.uid);
+      m._nuevo = true; msgs.push(m); pintar(abajo || m.autor_id === st.uid);
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'mensajes_evento' }, ({ old }) => {
       if (!ctx.vigente() || !msgs.some(x => x.id === old.id)) return;
@@ -2157,17 +2187,71 @@ async function iniciarChat(s, ctx) {
   };
   const ta = form.texto;
   ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px'; };
-  ta.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); form.requestSubmit(); } };
+  // ----- menciones: @ abre la lista de personas y grupos -----
+  const sug = $('#menSug');
+  const menMapa = new Map();   // "@Nombre" visible -> token "@[Nombre](id)"
+  let opciones = [], sel = 0, ini = -1;
+  const delDia = new Set((s.asignaciones || []).map(a => a.perfil_id));
+  const limpioN = n => String(n || '').replace(/[[\]()@]/g, '').trim();
+  const candidatos = q => {
+    const nq = normalizar(q);
+    const grupos = Object.entries(GRUPOS_MEN).map(([k, v]) => ({ vis: k, sub: v, token: `@[${k}](grupo)`, ico: '👥' }));
+    const gente = aprobados().filter(p => p.id !== st.uid && limpioN(p.nombre))
+      .sort((a, b) => delDia.has(b.id) - delDia.has(a.id) || a.nombre.localeCompare(b.nombre))
+      .map(p => ({ vis: limpioN(p.nombre), sub: delDia.has(p.id) ? 'Sirve este día' : INSTRUMENTOS[p.instrumento] || '', token: `@[${limpioN(p.nombre)}](${p.id})`, ico: iniciales(p.nombre) }));
+    return [...grupos, ...gente].filter(c => !nq || normalizar(c.vis).includes(nq)).slice(0, 7);
+  };
+  const cerrarSug = () => { sug.hidden = true; ini = -1; };
+  const pintarSug = () => {
+    sug.innerHTML = opciones.map((o, i) => `<button type="button" class="men-op ${i === sel ? 'activo' : ''}" data-op="${i}">
+      <span class="avatar sm">${esc(o.ico)}</span><span><b>@${esc(o.vis)}</b><small>${esc(o.sub)}</small></span></button>`).join('');
+    sug.hidden = !opciones.length;
+  };
+  const detectar = () => {
+    const pos = ta.selectionStart, m = /(^|\s)@([^\s@]{0,24})$/.exec(ta.value.slice(0, pos));
+    if (!m) return cerrarSug();
+    ini = pos - m[2].length - 1;
+    opciones = candidatos(m[2]); sel = 0; pintarSug();
+  };
+  const elegir = i => {
+    const o = opciones[i];
+    if (!o || ini < 0) return;
+    const vis = '@' + o.vis + ' ';
+    ta.value = ta.value.slice(0, ini) + vis + ta.value.slice(ta.selectionStart);
+    menMapa.set('@' + o.vis, o.token);
+    const c = ini + vis.length;
+    cerrarSug(); ta.focus(); ta.setSelectionRange(c, c); ajustarAlto();
+  };
+  const conTokens = t => [...menMapa.keys()].sort((a, b) => b.length - a.length).reduce((acc, k) => acc.split(k).join(menMapa.get(k)), t);
+  const ajustarAlto = ta.oninput;
+  ta.oninput = () => { ajustarAlto(); detectar(); };
+  ta.onblur = () => setTimeout(cerrarSug, 150);
+  sug.onpointerdown = e => e.preventDefault();
+  sug.onclick = e => { const b = e.target.closest('[data-op]'); if (b) elegir(+b.dataset.op); };
+  form.querySelector('[data-at]').onclick = () => {
+    const p = ta.selectionStart ?? ta.value.length;
+    const pre = p && !/\s/.test(ta.value[p - 1]) ? ' @' : '@';
+    ta.value = ta.value.slice(0, p) + pre + ta.value.slice(p);
+    ta.focus(); const c = p + pre.length; ta.setSelectionRange(c, c); detectar();
+  };
+  ta.onkeydown = e => {
+    if (!sug.hidden && opciones.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + opciones.length) % opciones.length; return pintarSug(); }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); return elegir(sel); }
+      if (e.key === 'Escape') { e.preventDefault(); return cerrarSug(); }
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); form.requestSubmit(); }
+  };
   form.onsubmit = async e => {
     e.preventDefault();
-    const texto = ta.value.trim();
+    const texto = conTokens(ta.value.trim());
     if (!texto) return;
     const btn = form.querySelector('[type=submit]');
     btn.disabled = true;
     const { data, error } = await sb.from('mensajes_evento').insert({ setlist_id: s.id, texto, autor_id: st.uid }).select().single();
     btn.disabled = false;
     if (error) return fallo(error, 'Chat');
-    ta.value = ''; ta.oninput();
+    ta.value = ''; menMapa.clear(); ta.oninput();
     if (!msgs.some(x => x.id === data.id)) { msgs.push(data); pintar(); }
   };
 }
@@ -2196,6 +2280,7 @@ function modalPublicarDia(s) {
 }
 
 async function modalItem(s, items, it) {
+  const hist = await cargarHistorial();
   const [rc, rt] = await Promise.all([
     sb.from('canciones').select(st.faltaV6 ? 'id, titulo, artista, tono_original' : 'id, titulo, artista, tono_original, ritmo').order('titulo'),
     sb.from('tonos_cantante').select('cancion_id, cantante_id, tono'),
@@ -2211,7 +2296,8 @@ async function modalItem(s, items, it) {
     <form id="fItem">
       <label>Canción</label>
       <select name="cancion_id" required>${it ? '' : '<option value="">Elige…</option>'}${canciones.map(c =>
-        `<option value="${c.id}" ${c.id === it?.cancion_id ? 'selected' : ''}>${ICON_RITMO[c.ritmo] ? ICON_RITMO[c.ritmo] + ' ' : ''}${esc(c.titulo)}${c.artista ? ' — ' + esc(c.artista) : ''}</option>`).join('')}</select>
+        `<option value="${c.id}" ${c.id === it?.cancion_id ? 'selected' : ''}>${ICON_RITMO[c.ritmo] ? ICON_RITMO[c.ritmo] + ' ' : ''}${esc(c.titulo)}${c.artista ? ' — ' + esc(c.artista) : ''}${hist.size ? ' · ' + esc(hist.has(c.id) ? txtUltima(hist.get(c.id).ultima_vez).toLowerCase() : 'nueva') : ''}</option>`).join('')}</select>
+      <div id="usoCancion"></div>
       <div class="fila">
         <div><label>Cantante</label><select name="cantante_id"><option value="">Sin asignar</option>${lista.map(p =>
           `<option value="${p.id}" ${p.id === it?.cantante_id ? 'selected' : ''}>${delDia.has(p.id) ? '★ ' : ''}${esc(p.nombre)}</option>`).join('')}</select></div>
@@ -2234,6 +2320,13 @@ async function modalItem(s, items, it) {
     $('#ayudaTono', body).textContent = c
       ? `Original: ${tonoTxt(c.tono_original)}${guardado ? ` · ${nombreDe(form.cantante_id.value)} la canta en ${tonoTxt(guardado)}` : ''}`
       : '';
+    const uso = $('#usoCancion', body);
+    if (uso) {
+      const h = hist.get(form.cancion_id.value);
+      uso.innerHTML = !c || !hist.size ? '' : h
+        ? `<div class="uso-box ${frescura(h)}">🕒 <b>${esc(txtUltima(h.ultima_vez))}</b> · ${h.veces_90d} ${h.veces_90d === 1 ? 'vez' : 'veces'} en 3 meses · ${h.veces_total} en total${frescura(h) === 'reciente' ? '<br><small>Se cantó hace poco</small>' : ''}</div>`
+        : '<div class="uso-box nueva">✨ Primera vez en el repertorio</div>';
+    }
     const optR = form.ritmo?.querySelector('option[value=""]');
     if (optR) optR.textContent = `Según la canción${c?.ritmo ? ` (${RITMOS[c.ritmo]})` : ' (sin definir)'}`;
   };
@@ -2485,6 +2578,8 @@ function vistaPerfil() {
     <div class="card">
       <label class="check" style="margin-top:0"><input type="checkbox" id="chkLatino" ${ajustes.latino ? 'checked' : ''}> Mostrar acordes en cifrado latino (Do, Re, Mi…)</label>
     </div>
+    <div id="cardNotif"></div>
+    <div id="cardIndisp"></div>
     ${!standalone ? `<div class="card instalar">
       <p>📲 ${ios ? 'Para instalar en iPhone: abre en <b>Safari</b>, toca <b>Compartir</b> ⬆️ y luego <b>"Agregar a inicio"</b>.' : 'Instala la app en tu celular para abrirla como cualquier otra.'}</p>
       ${!ios ? `<button class="btn sm prim" id="bInstalar">Instalar</button>` : ''}
@@ -2513,9 +2608,285 @@ function vistaPerfil() {
   $('#bClave').onclick = modalNuevaClave;
   $('#bSalir').onclick = async () => { await idb.limpiar(); await sb.auth.signOut(); location.hash = ''; };
   $('#bOffline').onclick = e => descargarSinConexion(e.currentTarget);
+  pintarNotif();
+  pintarIndisp();
   const bi = $('#bInstalar');
   if (bi) bi.onclick = async () => {
     if (st.instalarEvt) { st.instalarEvt.prompt(); st.instalarEvt = null; }
     else toast('Usa el menú ⋮ del navegador → "Instalar app" o "Agregar a pantalla principal"');
+  };
+}
+
+
+// =====================================================================
+// MENCIONES
+// =====================================================================
+const RX_MEN = /@\[([^\]]+)\]\((grupo|[0-9a-f-]{36})\)/g;
+const GRUPOS_MEN = { todos: 'Todos los del día', voces: 'Voces del día', musicos: 'Músicos del día', admins: 'Administradores' };
+
+function enGrupo(g, s) {
+  if (g === 'admins') return esAdmin();
+  const mias = (s?.asignaciones || []).filter(a => a.perfil_id === st.uid);
+  if (g === 'todos') return mias.length > 0;
+  if (g === 'voces') return mias.some(a => a.rol === 'voz');
+  if (g === 'musicos') return mias.some(a => a.rol !== 'voz');
+  return false;
+}
+const esParaMi = (n, id, s) => id === st.uid || (id === 'grupo' && enGrupo(n, s));
+function textoConMenciones(t, s) {
+  return esc(t).replace(RX_MEN, (_, n, id) => `<span class="mencion${esParaMi(n, id, s) ? ' a-mi' : ''}${id === 'grupo' ? ' grupo' : ''}">@${n}</span>`);
+}
+const mencionaA = (t, s) => [...String(t || '').matchAll(RX_MEN)].some(m => esParaMi(m[1], m[2], s));
+
+async function iniciarGlobal() {
+  if (st.canalGlobal) { sb.removeChannel(st.canalGlobal); st.canalGlobal = null; }
+  if (!navigator.onLine) return;
+  const r = await sb.from('menciones').select('id', { count: 'exact', head: true }).eq('perfil_id', st.uid).is('leido_at', null);
+  st.faltaV7 = !!r.error && !esErrorRed(r.error);
+  if (r.error) return;
+  ponerBadgeMen(r.count || 0, !!r.count);
+  st.canalGlobal = sb.channel('menciones-' + st.uid)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'menciones', filter: `perfil_id=eq.${st.uid}` }, async ({ new: m }) => {
+      const { data } = await sb.from('mensajes_evento').select('autor_id, setlist_id').eq('id', m.mensaje_id).maybeSingle();
+      if (data && location.hash.startsWith('#/dia/' + data.setlist_id)) {
+        await sb.from('menciones').update({ leido_at: new Date().toISOString() }).eq('id', m.id);
+        return;
+      }
+      ponerBadgeMen(st.menNoLeidas + 1, true);
+      if (data) aviso(`💬 ${nombreDe(data.autor_id)} te mencionó · toca para ver`, `#/dia/${data.setlist_id}?men=${m.mensaje_id}`);
+    })
+    .subscribe();
+}
+
+function ponerBadgeMen(n, animar = false) {
+  st.menNoLeidas = Math.max(0, n);
+  document.querySelectorAll('.men-badge').forEach(b => {
+    b.hidden = !st.menNoLeidas;
+    b.textContent = st.menNoLeidas > 9 ? '9+' : st.menNoLeidas;
+    if (animar) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); }
+  });
+  if (animar) document.querySelectorAll('.campana').forEach(c => { c.classList.remove('sonando'); void c.offsetWidth; c.classList.add('sonando'); });
+}
+
+async function marcarLeidas(setId) {
+  if (st.faltaV7 || !navigator.onLine) return;
+  const { data } = await sb.from('menciones').select('id, mensaje:mensajes_evento!inner(setlist_id)')
+    .eq('perfil_id', st.uid).is('leido_at', null).eq('mensaje.setlist_id', setId);
+  if (!data?.length) return;
+  const { error } = await sb.from('menciones').update({ leido_at: new Date().toISOString() }).in('id', data.map(m => m.id));
+  if (!error) ponerBadgeMen(st.menNoLeidas - data.length);
+}
+
+/** Aviso que baja desde arriba; al tocarlo lleva a href. */
+function aviso(msg, href) {
+  const a = document.createElement('a');
+  a.className = 'aviso-top'; a.href = href; a.textContent = msg;
+  document.body.appendChild(a);
+  navigator.vibrate?.(40);
+  requestAnimationFrame(() => requestAnimationFrame(() => a.classList.add('ver')));
+  const quitar = () => { a.classList.remove('ver'); setTimeout(() => a.remove(), 400); };
+  a.addEventListener('click', quitar);
+  setTimeout(quitar, 5500);
+}
+
+async function modalMenciones() {
+  if (st.faltaV7) return toast(esAdmin() ? 'Ejecuta supabase/007_menciones_push.sql en Supabase' : 'Las menciones aún no están activadas', true);
+  abrirModal('Menciones', '<div class="spinner"></div>');
+  const { data, error } = await conCache('menciones', sb.from('menciones')
+    .select('id, leido_at, created_at, mensaje:mensajes_evento(id, texto, autor_id, setlist_id, setlist:setlists(titulo, fecha))')
+    .eq('perfil_id', st.uid).order('created_at', { ascending: false }).limit(40));
+  if (!dlg.open) return;
+  if (error) { abrirModal('Menciones', '<div class="vacio">No se pudieron cargar las menciones.</div>'); return; }
+  const lista = (data || []).filter(m => m.mensaje);
+  const noLeidas = lista.filter(m => !m.leido_at).length;
+  const body = abrirModal('Menciones', `
+    ${noLeidas ? '<button class="btn sm" data-todas style="margin-bottom:10px">✓ Marcar todas como leídas</button>' : ''}
+    <div class="men-lista">${lista.map(m => `
+      <a class="men-item${m.leido_at ? '' : ' no-leida'}" href="#/dia/${m.mensaje.setlist_id}?men=${m.mensaje.id}">
+        <span class="avatar sm">${esc(iniciales(nombreDe(m.mensaje.autor_id)))}</span>
+        <span class="info">
+          <span class="quien"><b>${esc(nombreDe(m.mensaje.autor_id))}</b><small>${esc(haceCuanto(m.created_at))}</small></span>
+          <span class="donde">${esc(m.mensaje.setlist?.titulo || 'Chat del día')}${m.mensaje.setlist?.fecha ? ' · ' + esc(fmtCorta(m.mensaje.setlist.fecha)) : ''}</span>
+          <span class="txt">${textoConMenciones(m.mensaje.texto, null)}</span>
+        </span>
+      </a>`).join('') || '<div class="vacio"><span class="grande">💬</span>Nadie te ha mencionado todavía.<br><small>Cuando alguien escriba @ con tu nombre en un chat, aparecerá aquí.</small></div>'}</div>`);
+  body.onclick = async e => {
+    if (e.target.closest('.men-item')) return cerrarModal();
+    if (!e.target.closest('[data-todas]')) return;
+    const { error: e2 } = await sb.from('menciones').update({ leido_at: new Date().toISOString() }).eq('perfil_id', st.uid).is('leido_at', null);
+    if (e2) return fallo(e2, 'Menciones');
+    ponerBadgeMen(0); toast('Listo'); cerrarModal();
+  };
+  dlg.addEventListener('close', () => (body.onclick = null), { once: true });
+}
+
+document.addEventListener('click', e => { if (e.target.closest('[data-men]')) modalMenciones(); });
+
+// =====================================================================
+// HISTORIAL DE CANCIONES
+// =====================================================================
+async function cargarHistorial() {
+  if (st.historial && Date.now() - st.historialT < 60000) return st.historial;
+  const { data, error } = await conCache('historial', sb.from('historial_canciones').select('*'));
+  st.historial = new Map((error ? [] : data || []).map(h => [h.cancion_id, h]));
+  st.historialT = Date.now();
+  return st.historial;
+}
+function haceDias(iso) {
+  if (!iso) return null;
+  const a = new Date(claveDia(new Date(iso)) + 'T00:00'), b = new Date(claveDia(new Date()) + 'T00:00');
+  return Math.round((b - a) / 864e5);
+}
+function txtUltima(iso) {
+  const d = haceDias(iso);
+  if (d == null) return 'Nunca se ha cantado';
+  if (d <= 0) return 'Hoy';
+  if (d === 1) return 'Ayer';
+  if (d < 14) return `Hace ${d} días`;
+  if (d < 60) return `Hace ${Math.round(d / 7)} semanas`;
+  const m = Math.round(d / 30);
+  return m < 12 ? `Hace ${m} meses` : 'Hace más de un año';
+}
+/** reciente (< 3 semanas) · media · fria (> 3 meses) · nueva (nunca) */
+const frescura = h => { const d = haceDias(h?.ultima_vez); return d == null ? 'nueva' : d < 21 ? 'reciente' : d < 90 ? 'media' : 'fria'; };
+
+// =====================================================================
+// INDISPONIBILIDAD
+// =====================================================================
+async function cargarIndisp(desde, hasta) {
+  if (st.faltaV7) return [];
+  const { data, error } = await conCache(`indisp:${desde}:${hasta}`, sb.from('indisponibilidad')
+    .select('perfil_id, desde, hasta, motivo').lte('desde', hasta).gte('hasta', desde));
+  return error ? [] : data || [];
+}
+const fmtDiaK = k => new Date(k + 'T00:00').toLocaleDateString('es-PA', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '');
+const fmtRango = (d, h) => (d === h ? fmtDiaK(d) : `${fmtDiaK(d)} → ${fmtDiaK(h)}`);
+
+async function pintarIndisp() {
+  const box = $('#cardIndisp');
+  if (!box) return;
+  const hoyK = claveDia(new Date());
+  const { data, error } = await sb.from('indisponibilidad').select('*').eq('perfil_id', st.uid).gte('hasta', hoyK).order('desde');
+  if (!$('#cardIndisp')) return;
+  if (error) {
+    box.innerHTML = esErrorRed(error) || !esAdmin() ? ''
+      : '<div class="card" style="border-color:var(--peligro)">⚠️ Para activar menciones, fechas no disponibles y notificaciones ejecuta <b>supabase/007_menciones_push.sql</b> en Supabase → SQL Editor.</div>';
+    return;
+  }
+  box.innerHTML = `<div class="card">
+    <b>🚫 Fechas que no puedo servir</b>
+    <p class="ayuda" style="margin:4px 0 10px">Los administradores lo verán al armar el equipo de cada día.</p>
+    <div class="indisp-lista">${data.map(i => `<div class="indisp-item">
+      <span class="rango">${esc(fmtRango(i.desde, i.hasta))}</span><small>${esc(i.motivo || '')}</small>
+      <button class="x" data-ind="${i.id}" aria-label="Quitar">✕</button></div>`).join('') || '<p class="ayuda" style="margin:0 0 6px">No tienes fechas marcadas.</p>'}</div>
+    <form id="fIndisp">
+      <div class="fila"><div><label>Desde</label><input type="date" name="desde" required min="${hoyK}"></div>
+        <div><label>Hasta</label><input type="date" name="hasta" required min="${hoyK}"></div></div>
+      <label>Motivo (opcional)</label><input name="motivo" maxlength="120" placeholder="Viaje, trabajo…">
+      <button class="btn prim blk" style="margin-top:12px">Agregar fechas</button>
+    </form></div>`;
+  const f = $('#fIndisp');
+  f.desde.onchange = () => { f.hasta.min = f.desde.value; if (!f.hasta.value || f.hasta.value < f.desde.value) f.hasta.value = f.desde.value; };
+  f.onsubmit = e => {
+    e.preventDefault();
+    ocupado(f.querySelector('button'), async () => {
+      const { error: e2 } = await sb.from('indisponibilidad').insert({ desde: f.desde.value, hasta: f.hasta.value, motivo: f.motivo.value.trim() || null });
+      if (e2) return fallo(e2, 'Fechas');
+      toast('Fechas guardadas'); pintarIndisp();
+    });
+  };
+  box.querySelector('.indisp-lista').onclick = async e => {
+    const b = e.target.closest('[data-ind]');
+    if (!b) return;
+    b.closest('.indisp-item').classList.add('saliendo');
+    const { error: e2 } = await sb.from('indisponibilidad').delete().eq('id', b.dataset.ind);
+    if (e2) return fallo(e2, 'Fechas');
+    setTimeout(pintarIndisp, 250);
+  };
+}
+
+// =====================================================================
+// NOTIFICACIONES PUSH
+// =====================================================================
+const PUSH_TIPOS = {
+  asignacion: ['🙋', 'Cuando me asignan a un día'],
+  recordatorio: ['⏰', 'Recordatorio un día antes'],
+  mencion: ['💬', 'Cuando me mencionan en un chat'],
+  en_vivo: ['🔴', 'Cuando empieza un en vivo donde sirvo'],
+  muro: ['📣', 'Nuevas publicaciones en el muro'],
+};
+const PUSH_DEF = { asignacion: true, recordatorio: true, mencion: true, en_vivo: true, muro: false };
+const pushSoportado = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const b64aU8 = b => { const p = '='.repeat((4 - b.length % 4) % 4); return Uint8Array.from(atob((b + p).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)); };
+const nombreDispositivo = () => (/iphone|ipad/i.test(navigator.userAgent) ? 'iPhone' : /android/i.test(navigator.userAgent) ? 'Android' : 'Computadora');
+
+async function miSuscripcion() {
+  if (!pushSoportado()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+async function activarPush() {
+  if (!VAPID_PUBLIC_KEY) throw new Error('Falta configurar VAPID_PUBLIC_KEY en js/config.js');
+  if (await Notification.requestPermission() !== 'granted') throw new Error('No diste permiso para notificaciones');
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64aU8(VAPID_PUBLIC_KEY) });
+  const j = sub.toJSON();
+  await sb.from('push_suscripciones').delete().eq('endpoint', j.endpoint);
+  const { error } = await sb.from('push_suscripciones').insert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, dispositivo: nombreDispositivo() });
+  if (error) throw error;
+}
+async function desactivarPush() {
+  const sub = await miSuscripcion();
+  if (!sub) return;
+  await sb.from('push_suscripciones').delete().eq('endpoint', sub.endpoint);
+  await sub.unsubscribe();
+}
+
+async function pintarNotif() {
+  const box = $('#cardNotif');
+  if (!box) return;
+  if (st.faltaV7) { box.innerHTML = ''; return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  let estado;
+  if (!pushSoportado()) estado = ios && !standalone ? 'ios' : 'no';
+  else if (Notification.permission === 'denied') estado = 'bloq';
+  else estado = (await miSuscripcion().catch(() => null)) ? 'on' : 'off';
+  if (!$('#cardNotif')) return;
+  const prefs = { ...PUSH_DEF, ...(st.perfil.notif || {}) };
+  const ETIQ = { on: 'Activas aquí', off: 'Apagadas', bloq: 'Bloqueadas', ios: 'Instala la app', no: 'No disponible' };
+  box.innerHTML = `<div class="card notif">
+    <div class="notif-h"><b>🔔 Notificaciones</b><span class="estado-push ${estado}">${ETIQ[estado]}</span></div>
+    ${estado === 'ios' ? '<p class="ayuda">En iPhone llegan solo con la app instalada en la pantalla de inicio (iOS 16.4 o más). Instálala y vuelve aquí.</p>' : ''}
+    ${estado === 'bloq' ? '<p class="ayuda">Las bloqueaste en este navegador. Permítelas en los ajustes del sitio y vuelve a abrir la app.</p>' : ''}
+    ${estado === 'no' ? '<p class="ayuda">Este navegador no permite notificaciones.</p>' : ''}
+    ${estado === 'off' ? '<p class="ayuda" style="margin-bottom:0">Recibe avisos aunque la app esté cerrada.</p><button class="btn prim blk" data-push="on" style="margin-top:10px">Activar en este celular</button>' : ''}
+    ${'notif' in st.perfil ? `<div class="prefs">${Object.entries(PUSH_TIPOS).map(([k, [ico, txt]]) =>
+      `<label class="switch"><span>${ico} ${txt}</span><input type="checkbox" data-pref="${k}" ${prefs[k] ? 'checked' : ''}><i></i></label>`).join('')}</div>` : ''}
+    ${estado === 'on' ? '<div class="fila" style="margin-top:12px"><button class="btn sm" data-push="prueba">Enviar prueba</button><button class="btn sm peligro" data-push="off">Apagar aquí</button></div>' : ''}
+  </div>`;
+  box.onclick = async e => {
+    const b = e.target.closest('[data-push]');
+    if (!b) return;
+    const txt = b.textContent; b.disabled = true; b.textContent = '…';
+    try {
+      if (b.dataset.push === 'on') { await activarPush(); toast('🔔 Notificaciones activadas'); }
+      else if (b.dataset.push === 'off') { await desactivarPush(); toast('Notificaciones apagadas en este celular'); }
+      else {
+        const { data, error } = await sb.functions.invoke('push', { body: { tipo: 'prueba' } });
+        if (error) throw error;
+        toast(data?.enviados ? 'Enviada · revisa tu celular' : 'No se encontró este celular, actívalas de nuevo', !data?.enviados);
+      }
+    } catch (err) { fallo(err, 'Notificaciones'); }
+    b.disabled = false; b.textContent = txt;
+    pintarNotif();
+  };
+  box.onchange = async e => {
+    const c = e.target.closest('[data-pref]');
+    if (!c) return;
+    const notif = { ...PUSH_DEF, ...(st.perfil.notif || {}), [c.dataset.pref]: c.checked };
+    const { error } = await sb.from('profiles').update({ notif }).eq('id', st.uid);
+    if (error) { c.checked = !c.checked; return fallo(error, 'Preferencias'); }
+    st.perfil = { ...st.perfil, notif }; st.perfiles.set(st.uid, st.perfil);
   };
 }
