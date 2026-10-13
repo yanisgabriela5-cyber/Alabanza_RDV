@@ -44,7 +44,7 @@ img { max-width: 100%; }
 @keyframes gira { to { transform: rotate(360deg); } }
 
 /* ---------- encabezado ---------- */
-.top { display: flex; align-items: center; gap: 12px; padding: 10px 0 14px; position: sticky; top: 0; z-index: 5; background: linear-gradient(var(--bg) 75%, transparent); }
+.top { display: flex; align-items: center; gap: 12px; padding: calc(10px + var(--safe-t)) 0 14px; margin-top: calc(-1 * var(--safe-t)); position: sticky; top: 0; z-index: 5; background: linear-gradient(var(--bg) 75%, transparent); }
 .top img { width: 38px; height: 38px; }
 .top h1 { font-size: 21px; margin: 0; flex: 1; letter-spacing: -.2px; }
 .top .sub { font-size: 12px; color: var(--texto-3); display: block; font-weight: 500; }
@@ -161,7 +161,7 @@ textarea.letra { min-height: 300px; font-family: ui-monospace, SFMono-Regular, M
 
 /* ---------- canción ---------- */
 .cancion-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
-.controles { position: sticky; top: 62px; z-index: 4; background: var(--bg); padding: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--linea); margin-bottom: 12px; }
+.controles { position: sticky; top: calc(62px + var(--safe-t)); z-index: 4; background: var(--bg); padding: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--linea); margin-bottom: 12px; }
 .controles .tono-actual { display: flex; align-items: center; gap: 6px; }
 .controles .tono-actual select { width: auto; padding: 7px 8px; font-weight: 800; color: var(--acento-2); }
 .controles .sep { flex: 1; }
