@@ -1300,6 +1300,7 @@ function iniciarBuscadorCanciones(caja, canciones, { valor = '', etiqueta = () =
   const idx = canciones.map(c => ({ c, tit: normalizar(`${c.titulo} ${c.artista || ''}`), letra: normalizar(sinAcordes(c.letra)) }));
   const pintar = () => {
     const palabras = normalizar(q.value).trim().split(/\s+/).filter(Boolean);
+    if (!palabras.length) { res.innerHTML = '<p class="ayuda" style="text-align:center;margin:8px 0">✍️ Escribe el nombre, el artista o una frase de la letra</p>'; return; }
     const enTit = [], enLetra = [];
     for (const x of idx) {
       if (palabras.every(p => x.tit.includes(p))) enTit.push(x.c);
@@ -1326,6 +1327,7 @@ function iniciarBuscadorCanciones(caja, canciones, { valor = '', etiqueta = () =
   sel.onclick = e => { if (e.target.closest('[data-cambiar]')) { elegir(''); q.focus(); } };
   pintar();
   if (valor) elegir(valor, false);
+  else setTimeout(() => q.focus(), 80);   // listo para escribir apenas se abre
   return { elegir, valor: () => hid.value };
 }
 
