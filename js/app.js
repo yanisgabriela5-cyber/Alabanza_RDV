@@ -1281,6 +1281,54 @@ const ICON_RITMO = { rapida: '⚡', lenta: '🕊️' };
 const ritmoDe = it => it?.ritmo || it?.cancion?.ritmo || '';
 const ORDEN_RITMO = { rapida: 0, lenta: 1, '': 2 };
 const hayRitmo = items => items.some(i => ritmoDe(i));
+/** HTML del buscador de canciones (reemplaza al <select>, que en iPhone no deja buscar). */
+const htmlBuscadorCanciones = (name = 'cancion_id') => `
+  <div class="bc">
+    <input type="hidden" name="${name}">
+    <div class="bc-sel item" hidden></div>
+    <div class="bc-busca">
+      <div class="buscador" style="margin:0 0 6px"><input type="search" class="bc-q" placeholder="Buscar por nombre, artista o letra…" autocomplete="off" enterkeyhint="search"></div>
+      <div class="bc-res"></div>
+    </div>
+  </div>`;
+
+/** Activa el buscador. etiqueta(c) agrega texto extra a cada resultado (p. ej. última vez usada). */
+function iniciarBuscadorCanciones(caja, canciones, { valor = '', etiqueta = () => '', alElegir = () => {} } = {}) {
+  const hid = caja.querySelector('input[type=hidden]'), q = caja.querySelector('.bc-q');
+  const res = caja.querySelector('.bc-res'), sel = caja.querySelector('.bc-sel'), busca = caja.querySelector('.bc-busca');
+  const sinAcordes = t => (t || '').replace(/\[[^\]]*\]/g, '');
+  const idx = canciones.map(c => ({ c, tit: normalizar(`${c.titulo} ${c.artista || ''}`), letra: normalizar(sinAcordes(c.letra)) }));
+  const pintar = () => {
+    const palabras = normalizar(q.value).trim().split(/\s+/).filter(Boolean);
+    const enTit = [], enLetra = [];
+    for (const x of idx) {
+      if (palabras.every(p => x.tit.includes(p))) enTit.push(x.c);
+      else if (palabras.length && palabras.every(p => x.tit.includes(p) || x.letra.includes(p))) enLetra.push(x.c);
+    }
+    const fila = (c, deLetra) => `<button type="button" class="bc-op" data-id="${c.id}">
+      <b>${ICON_RITMO[c.ritmo] ? ICON_RITMO[c.ritmo] + ' ' : ''}${esc(c.titulo)}</b>
+      <small>${[c.artista, c.tono_original ? 'Tono ' + tonoTxt(c.tono_original) : '', etiqueta(c), deLetra ? '📝 coincide en la letra' : ''].filter(Boolean).map(esc).join(' · ')}</small></button>`;
+    res.innerHTML = enTit.map(c => fila(c, false)).join('') + enLetra.map(c => fila(c, true)).join('')
+      || '<p class="ayuda" style="text-align:center">Sin resultados</p>';
+  };
+  const elegir = (id, avisar = true) => {
+    const c = canciones.find(x => x.id === id);
+    hid.value = c ? c.id : '';
+    sel.hidden = !c; busca.hidden = !!c;
+    if (c) sel.innerHTML = `<div class="info"><b>${esc(c.titulo)}</b><small>${esc([c.artista, c.tono_original ? 'Tono ' + tonoTxt(c.tono_original) : ''].filter(Boolean).join(' · '))}</small></div>
+      <button type="button" class="btn sm" data-cambiar style="margin:0">Cambiar</button>`;
+    else { q.value = ''; pintar(); }
+    if (avisar) alElegir(hid.value);
+  };
+  q.oninput = pintar;
+  q.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const p = res.querySelector('.bc-op'); if (p) elegir(p.dataset.id); } };
+  res.onclick = e => { const b = e.target.closest('.bc-op'); if (b) elegir(b.dataset.id); };
+  sel.onclick = e => { if (e.target.closest('[data-cambiar]')) { elegir(''); q.focus(); } };
+  pintar();
+  if (valor) elegir(valor, false);
+  return { elegir, valor: () => hid.value };
+}
+
 /** Arrastrar filas .set-item por su agarradera [data-acc="drag"]. Llama alSoltar(ids) si cambió el orden. */
 function activarArrastre(lista, alSoltar) {
   if (!lista) return;
@@ -2350,7 +2398,7 @@ function modalPublicarDia(s) {
 async function modalItem(s, items, it) {
   const hist = await cargarHistorial();
   const [rc, rt] = await Promise.all([
-    sb.from('canciones').select(st.faltaV6 ? 'id, titulo, artista, tono_original' : 'id, titulo, artista, tono_original, ritmo').order('titulo'),
+    sb.from('canciones').select(st.faltaV6 ? 'id, titulo, artista, tono_original, letra' : 'id, titulo, artista, tono_original, ritmo, letra').order('titulo'),
     sb.from('tonos_cantante').select('cancion_id, cantante_id, tono'),
   ]);
   if (rc.error || rt.error) return fallo(rc.error || rt.error, 'Canciones');
@@ -2363,8 +2411,7 @@ async function modalItem(s, items, it) {
   const body = abrirModal(it ? 'Editar canción del repertorio' : 'Agregar canción', `
     <form id="fItem">
       <label>Canción</label>
-      <select name="cancion_id" required>${it ? '' : '<option value="">Elige…</option>'}${canciones.map(c =>
-        `<option value="${c.id}" ${c.id === it?.cancion_id ? 'selected' : ''}>${ICON_RITMO[c.ritmo] ? ICON_RITMO[c.ritmo] + ' ' : ''}${esc(c.titulo)}${c.artista ? ' — ' + esc(c.artista) : ''}${hist.size ? ' · ' + esc(hist.has(c.id) ? txtUltima(hist.get(c.id).ultima_vez).toLowerCase() : 'nueva') : ''}</option>`).join('')}</select>
+      <div id="bcItem">${htmlBuscadorCanciones()}</div>
       <div id="usoCancion"></div>
       <div class="fila">
         <div><label>Cantante</label><select name="cantante_id"><option value="">Sin asignar</option>${lista.map(p =>
@@ -2398,7 +2445,12 @@ async function modalItem(s, items, it) {
     const optR = form.ritmo?.querySelector('option[value=""]');
     if (optR) optR.textContent = `Según la canción${c?.ritmo ? ` (${RITMOS[c.ritmo]})` : ' (sin definir)'}`;
   };
-  form.cancion_id.onchange = sugerir;
+  const yaEnDia = new Set(items.filter(x => x.id !== it?.id).map(x => x.cancion_id));
+  iniciarBuscadorCanciones($('#bcItem', body), canciones, {
+    valor: it?.cancion_id || '',
+    etiqueta: c => [yaEnDia.has(c.id) ? '✔️ ya está en este día' : '', hist.size ? (hist.has(c.id) ? txtUltima(hist.get(c.id).ultima_vez).toLowerCase() : 'nueva') : ''].filter(Boolean).join(' · '),
+    alElegir: sugerir,
+  });
   form.cantante_id.onchange = sugerir;
   if (!it) {
     // Por defecto, el cantante que dirige ese día (o la única voz asignada)
@@ -2412,6 +2464,7 @@ async function modalItem(s, items, it) {
     e.preventDefault();
     ocupado(form.querySelector('[type=submit]'), async () => {
       const f = Object.fromEntries(new FormData(form));
+      if (!f.cancion_id) return toast('Busca y elige una canción', true);
       const can = canciones.find(x => x.id === f.cancion_id);
       const datos = { cancion_id: f.cancion_id, cantante_id: f.cantante_id || null, tono: f.tono || null, notas: f.notas.trim() || null,
         ...(st.faltaV6 ? {} : { ritmo: f.ritmo && f.ritmo !== can?.ritmo ? f.ritmo : null }) };
@@ -2747,8 +2800,7 @@ async function modalTonosDe(perfilId, alCambiar = () => {}, tonoSel = null) {
     <div class="lista" id="lTonos">${tonos.map(t => filaTono(t, `<button class="btn-ico" data-borrar="${t.id}" aria-label="Eliminar">🗑️</button>`)).join('') || '<p class="ayuda">Aún no hay tonos guardados.</p>'}</div>
     <form id="fTonoDe" style="margin-top:12px">
       <label>Canción</label>
-      <select name="cancion_id" required><option value="">Elige…</option>${canciones.map(c =>
-        `<option value="${c.id}">${esc(c.titulo)}${c.artista ? ' — ' + esc(c.artista) : ''}</option>`).join('')}</select>
+      <div id="bcTono">${htmlBuscadorCanciones()}</div>
       <div class="fila">
         <div><label>Tono</label><select name="tono" required>${opcionesTono('', TODOS_LOS_TONOS, 'Elige…')}</select></div>
         <div><label>Original</label><input id="tOrig" disabled value="—"></div>
@@ -2764,10 +2816,14 @@ async function modalTonosDe(perfilId, alCambiar = () => {}, tonoSel = null) {
     form.tono.value = t?.tono || c?.tono_original || '';
     form.notas.value = t?.notas || '';
   };
-  form.cancion_id.onchange = precargar;
+  const conTono = new Map(tonos.map(t => [t.cancion_id, t]));
+  const bc = iniciarBuscadorCanciones($('#bcTono', body), canciones, {
+    etiqueta: c => (conTono.has(c.id) ? `🎤 guardado en ${tonoTxt(conTono.get(c.id).tono)}` : ''),
+    alElegir: precargar,
+  });
   const elegir = id => {
     const t = tonos.find(x => x.id === id); if (!t) return;
-    form.cancion_id.value = t.cancion_id; precargar();
+    bc.elegir(t.cancion_id);
     form.scrollIntoView({ behavior: 'smooth', block: 'end' }); form.tono.focus();
   };
   if (tonoSel) elegir(tonoSel);
@@ -2786,6 +2842,7 @@ async function modalTonosDe(perfilId, alCambiar = () => {}, tonoSel = null) {
     e.preventDefault();
     ocupado(form.querySelector('button'), async () => {
       const f = Object.fromEntries(new FormData(form));
+      if (!f.cancion_id) return toast('Busca y elige una canción', true);
       const { error } = await sb.from('tonos_cantante').upsert(
         { cancion_id: f.cancion_id, cantante_id: perfilId, tono: f.tono, notas: f.notas.trim() || null },
         { onConflict: 'cancion_id,cantante_id' });
