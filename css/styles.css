@@ -542,3 +542,12 @@ small.nd { display: block; color: var(--peligro); font-size: 11.5px; font-weight
 .seg { display: flex; gap: 6px; margin-top: 8px; }
 .seg button { flex: 1; padding: 9px 6px; border-radius: 10px; border: 1px solid var(--linea); background: var(--bg-2); color: var(--texto); font: inherit; font-size: 14px; cursor: pointer; }
 .seg button.activo { border-color: var(--acento); background: rgba(224, 180, 88, .16); font-weight: 700; }
+
+/* ---------- Buscador de canciones (agregar al día / tonos) ---------- */
+.bc-res { max-height: 260px; overflow-y: auto; border: 1px solid var(--linea); border-radius: 12px; background: var(--bg-2); padding: 4px; -webkit-overflow-scrolling: touch; }
+.bc-op { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 9px; padding: 9px 10px; color: var(--texto); font: inherit; cursor: pointer; }
+.bc-op + .bc-op { border-top: 1px solid var(--linea); border-radius: 0; }
+.bc-op:active, .bc-op:hover { background: var(--card); }
+.bc-op b { display: block; font-size: 15px; }
+.bc-op small { color: var(--texto-2); font-size: 12px; }
+.bc-sel { cursor: default; border-color: var(--acento); }
