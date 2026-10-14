@@ -14,6 +14,10 @@
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="css/styles.css">
+  <script>
+    // Tema guardado (auto / claro / oscuro) antes de pintar, para evitar parpadeo
+    try { var t = (JSON.parse(localStorage.getItem('alabanza.ajustes')) || {}).tema; if (t === 'claro' || t === 'oscuro') document.documentElement.dataset.tema = t; } catch (e) {}
+  </script>
 </head>
 <body>
   <div id="offline" class="offline" hidden>📴 Sin conexión · mostrando lo guardado en tu celular</div>
