@@ -39,6 +39,18 @@ const ajustes = (() => {
 })();
 const guardarAjustes = () => { try { localStorage.setItem(LS, JSON.stringify(ajustes)); } catch {} };
 
+// ---------- tema claro / oscuro ----------
+const mqClaro = matchMedia('(prefers-color-scheme: light)');
+function aplicarTema() {
+  const t = ajustes.tema === 'claro' || ajustes.tema === 'oscuro' ? ajustes.tema : 'auto';
+  if (t === 'auto') delete document.documentElement.dataset.tema;
+  else document.documentElement.dataset.tema = t;
+  const claro = t === 'claro' || (t === 'auto' && mqClaro.matches);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', claro ? '#f5f3ee' : '#11131c');
+}
+aplicarTema();
+mqClaro.addEventListener?.('change', aplicarTema);
+
 const $ = (s, el = document) => el.querySelector(s);
 const app = $('#app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1269,6 +1281,50 @@ const ICON_RITMO = { rapida: '⚡', lenta: '🕊️' };
 const ritmoDe = it => it?.ritmo || it?.cancion?.ritmo || '';
 const ORDEN_RITMO = { rapida: 0, lenta: 1, '': 2 };
 const hayRitmo = items => items.some(i => ritmoDe(i));
+/** Arrastrar filas .set-item por su agarradera [data-acc="drag"]. Llama alSoltar(ids) si cambió el orden. */
+function activarArrastre(lista, alSoltar) {
+  if (!lista) return;
+  lista.addEventListener('pointerdown', e => {
+    const h = e.target.closest('[data-acc="drag"]');
+    if (!h || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    const fila = h.closest('.set-item');
+    const inicial = [...lista.querySelectorAll('.set-item')].map(f => f.dataset.id);
+    let y0 = e.clientY + scrollY;
+    h.setPointerCapture(e.pointerId);
+    fila.classList.add('arrastrando'); lista.classList.add('ordenando');
+    navigator.vibrate?.(15);
+    const centro = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+    const mover = ev => {
+      // desplazar la pantalla si se acerca a los bordes
+      if (ev.clientY < 90) scrollBy(0, -12); else if (ev.clientY > innerHeight - 120) scrollBy(0, 12);
+      fila.style.transform = `translateY(${ev.clientY + scrollY - y0}px)`;
+      const c = centro(fila);
+      const sig = fila.nextElementSibling, ant = fila.previousElementSibling;
+      let antes = null;
+      if (sig?.classList.contains('set-item') && c > centro(sig)) { antes = fila.offsetTop; sig.after(fila); }
+      else if (ant?.classList.contains('set-item') && c < centro(ant)) { antes = fila.offsetTop; ant.before(fila); }
+      if (antes !== null) {
+        y0 += fila.offsetTop - antes;
+        fila.style.transform = `translateY(${ev.clientY + scrollY - y0}px)`;
+        lista.querySelectorAll('.set-item .num').forEach((n, k) => (n.textContent = k + 1));
+      }
+    };
+    const soltar = () => {
+      h.removeEventListener('pointermove', mover);
+      h.removeEventListener('pointerup', soltar);
+      h.removeEventListener('pointercancel', soltar);
+      fila.style.transform = '';
+      fila.classList.remove('arrastrando'); lista.classList.remove('ordenando');
+      const ids = [...lista.querySelectorAll('.set-item')].map(f => f.dataset.id);
+      if (ids.join() !== inicial.join()) alSoltar(ids);
+    };
+    h.addEventListener('pointermove', mover);
+    h.addEventListener('pointerup', soltar);
+    h.addEventListener('pointercancel', soltar);
+  });
+}
+
 /** Reordena el repertorio de un día: primero rápidas, luego lentas, luego sin definir (respeta el orden dentro de cada grupo). */
 async function ordenarPorRitmo(setId) {
   if (st.faltaV6) return false;
@@ -1987,13 +2043,6 @@ async function vistaDia(ctx) {
   if (!s) { app.innerHTML = encabezado('Día', { atras: '#/agenda' }) + '<div class="vacio">Este día ya no existe.</div>'; return; }
   s.asignaciones ??= [];
   const items = ri.data.filter(i => i.cancion);
-  // Si el orden no respeta rápidas → lentas (p. ej. cambió el ritmo de una canción), se corrige solo
-  if (esAdmin() && navigator.onLine && hayRitmo(items) &&
-      items.some((it, k) => k && ORDEN_RITMO[ritmoDe(it)] < ORDEN_RITMO[ritmoDe(items[k - 1])])) {
-    if (await ordenarPorRitmo(s.id)) { if (ctx.vigente()) rutear(); return; }
-  }
-  const conRitmo = hayRitmo(items);
-  const mismoGrupo = (a, b) => !conRitmo || (a && b && ritmoDe(a) === ritmoDe(b));
   const vivo = rv.data?.activo ? rv.data : null;
   const t = tipoDe(s);
   const mios = misRoles(s);
@@ -2030,18 +2079,19 @@ async function vistaDia(ctx) {
       ${esAdmin() ? '<button class="btn sm" data-acc="asignar">👥 Asignar equipo</button>' : ''}`}
     <div class="seccion-t" style="display:flex;justify-content:space-between;align-items:center">
       <span>🎵 Repertorio (${items.length})</span>
+      ${esAdmin() && items.length > 1 && hayRitmo(items) ? '<button class="btn sm" data-acc="ord-ritmo" style="margin:0">⚡→🕊️ Ordenar por ritmo</button>' : ''}
     </div>
-    <div class="lista">
-      ${items.map((it, i) => `${conRitmo && (i === 0 || ritmoDe(items[i - 1]) !== ritmoDe(it))
-        ? `<div class="sub-rep r-${ritmoDe(it) || 'nd'}">${RITMOS_PL[ritmoDe(it)]} <small>(${items.filter(x => ritmoDe(x) === ritmoDe(it)).length})</small></div>` : ''}
-      <div class="item set-item ${vivo && vivo.indice === i ? 'en-vivo' : ''}" data-acc="abrir" data-i="${i}">
+    ${esAdmin() && items.length > 1 ? '<p class="ayuda" style="margin:-4px 0 8px">Arrastra ⠿ para cambiar el orden.</p>' : ''}
+    <div class="lista" id="listaRep">
+      ${items.map((it, i) => `
+      <div class="item set-item ${vivo && vivo.indice === i ? 'en-vivo' : ''}" data-acc="abrir" data-i="${i}" data-id="${it.id}">
+        ${esAdmin() && items.length > 1 ? '<span class="arrastre" data-acc="drag" aria-label="Arrastrar para ordenar">⠿</span>' : ''}
         <span class="num">${i + 1}</span>
-        <div class="info"><b>${esc(it.cancion.titulo)}</b><small>${it.cantante_id ? '🎤 ' + esc(nombreDe(it.cantante_id)) : 'Sin cantante asignado'}${it.notas ? ' · ' + esc(it.notas) : ''}</small></div>
+        <div class="info"><b>${ICON_RITMO[ritmoDe(it)] ? ICON_RITMO[ritmoDe(it)] + ' ' : ''}${esc(it.cancion.titulo)}</b><small>${it.cantante_id ? '🎤 ' + esc(nombreDe(it.cantante_id)) : 'Sin cantante asignado'}${it.notas ? ' · ' + esc(it.notas) : ''}</small></div>
         <span class="tono-pill">${esc(tonoTxt(it.tono || it.cancion.tono_original))}</span>
-        ${esAdmin() ? `<div class="orden">
-          <button data-acc="subir" data-i="${i}" aria-label="Subir" ${i === 0 || !mismoGrupo(it, items[i - 1]) ? 'disabled' : ''}>▲</button>
+        ${esAdmin() ? `<div class="acc-item">
           <button data-acc="item" data-i="${i}" aria-label="Editar">✏️</button>
-          <button data-acc="bajar" data-i="${i}" aria-label="Bajar" ${i === items.length - 1 || !mismoGrupo(it, items[i + 1]) ? 'disabled' : ''}>▼</button>
+          <button data-acc="quitar" data-i="${i}" aria-label="Quitar del día">🗑️</button>
         </div>` : ''}
       </div>`).join('') || `<div class="vacio"><span class="grande">🎶</span>Todavía no hay canciones asignadas.</div>`}
     </div>
@@ -2063,6 +2113,21 @@ async function vistaDia(ctx) {
 
   if (!st.faltaV2 && !st.faltaV4) iniciarChat(s, ctx);
 
+  if (esAdmin() && items.length > 1) {
+    activarArrastre($('#listaRep'), async ids => {
+      const cambios = ids.map((id, k) => ({ id, k })).filter(({ id, k }) => items.find(x => x.id === id).orden !== k);
+      const res = await Promise.all(cambios.map(({ id, k }) => sb.from('setlist_items').update({ orden: k }).eq('id', id)));
+      const er = res.find(r => r.error);
+      if (er) fallo(er.error, 'Orden'); else toast('Orden guardado');
+      // Si hay un en vivo activo, que siga en la misma canción aunque cambie su posición
+      if (!er && vivo) {
+        const nuevo = ids.indexOf(items[vivo.indice]?.id);
+        if (nuevo >= 0 && nuevo !== vivo.indice) await sb.from('en_vivo').update({ indice: nuevo }).eq('setlist_id', s.id);
+      }
+      if (ctx.vigente()) rutear();
+    });
+  }
+
   const irCancion = (i, vivoParam = false) => {
     const it = items[i];
     location.hash = `#/cancion/${it.cancion_id}?set=${s.id}&i=${i}${it.tono ? '&tono=' + encodeURIComponent(it.tono) : ''}${vivoParam ? '&vivo=1' : ''}`;
@@ -2073,14 +2138,17 @@ async function vistaDia(ctx) {
     if (!el) return;
     const acc = el.dataset.acc, i = +el.dataset.i, it = items[i];
     try {
+      if (acc === 'drag') return;
       if (acc === 'abrir') irCancion(i, !!vivo);
-      else if (acc === 'subir' || acc === 'bajar') {
-        const j = acc === 'subir' ? i - 1 : i + 1;
-        const orden = items.map(x => x.id);
-        [orden[i], orden[j]] = [orden[j], orden[i]];
-        const res = await Promise.all(orden.map((idItem, k) => sb.from('setlist_items').update({ orden: k }).eq('id', idItem)));
-        const er = res.find(r => r.error); if (er) throw er.error;
-        rutear();
+      else if (acc === 'quitar') {
+        if (!confirm(`¿Quitar "${it.cancion.titulo}" del repertorio de este día?\n(La canción sigue en el módulo Canciones.)`)) return;
+        const { error } = await sb.from('setlist_items').delete().eq('id', it.id);
+        if (error) throw error;
+        toast('Quitada del repertorio'); rutear();
+      }
+      else if (acc === 'ord-ritmo') {
+        if (await ordenarPorRitmo(s.id)) { toast('Ordenado: rápidas → lentas'); rutear(); }
+        else toast('Ya estaba ordenado');
       }
       else if (acc === 'item') modalItem(s, items, it);
       else if (acc === 'agregar') modalItem(s, items, null);
@@ -2356,12 +2424,12 @@ async function modalItem(s, items, it) {
           .upsert({ cancion_id: datos.cancion_id, cantante_id: datos.cantante_id, tono: datos.tono }, { onConflict: 'cancion_id,cantante_id' });
         if (e2) fallo(e2, 'Tono');
       }
-      await ordenarPorRitmo(s.id);
       cerrarModal(); toast(it ? 'Actualizado' : 'Canción agregada'); rutear();
     });
   };
   const bq = $('#bQuitar', body);
   if (bq) bq.onclick = async () => {
+    if (!confirm('¿Quitar esta canción del repertorio del día? (Sigue en el módulo Canciones.)')) return;
     const { error } = await sb.from('setlist_items').delete().eq('id', it.id);
     if (error) return fallo(error, 'Repertorio');
     cerrarModal(); toast('Quitada del repertorio'); rutear();
@@ -2381,8 +2449,8 @@ async function compartirDia(s, items) {
     canto.length ? `\n🎤 *Cantores*\n${canto.join('\n')}` : null,
     instr.length ? `\n🎸 *Instrumentistas*\n${instr.join('\n')}` : null,
     items.length ? `\n🎵 *Canciones*\n${items.map((it, i) => {
-      const r = ritmoDe(it), cab = hayRitmo(items) && (i === 0 || ritmoDe(items[i - 1]) !== r) ? `_${RITMOS_PL[r]}_\n` : '';
-      return `${cab}${i + 1}. ${it.cancion.titulo} — ${tonoTxt(it.tono || it.cancion.tono_original)}${it.cantante_id ? ` (${nombreDe(it.cantante_id)})` : ''}`;
+      const ic = ICON_RITMO[ritmoDe(it)] ? ICON_RITMO[ritmoDe(it)] + ' ' : '';
+      return `${i + 1}. ${ic}${it.cancion.titulo} — ${tonoTxt(it.tono || it.cancion.tono_original)}${it.cantante_id ? ` (${nombreDe(it.cantante_id)})` : ''}`;
     }).join('\n')}` : null,
     s.notas ? `\n📝 ${s.notas}` : null,
     `\n${baseUrl()}#/dia/${s.id}`,
@@ -2449,8 +2517,10 @@ async function vistaEquipo(ctx) {
         <p class="ayuda" style="margin-top:0">${esc(p.email || '')}</p>
         <label>Instrumento / rol en el equipo</label><select id="mInstr">${opcionesInstrumento(p.instrumento)}</select>
         <button class="btn blk" id="mGuardar">Guardar instrumento</button>
+        <button class="btn blk" id="mTonos">🎤 Ver / editar sus tonos</button>
         <button class="btn blk" id="mAdmin">${p.rol === 'admin' ? 'Quitar administrador' : '⭐ Hacer administrador'}</button>
         <button class="btn peligro blk" id="mBloq">Desactivar acceso</button>`);
+      $('#mTonos', body).onclick = () => modalTonosDe(p.id);
       $('#mGuardar', body).onclick = () => actualizar(p.id, { instrumento: $('#mInstr', body).value }, 'Guardado');
       $('#mAdmin', body).onclick = () => actualizar(p.id, { rol: p.rol === 'admin' ? 'miembro' : 'admin' }, 'Rol actualizado');
       $('#mBloq', body).onclick = () => confirm(`¿Desactivar a ${p.nombre}?`) && actualizar(p.id, { estado: 'bloqueado' }, 'Desactivado');
@@ -2576,8 +2646,12 @@ function vistaPerfil() {
       <button class="btn prim blk">Guardar</button>
     </form>
     <div class="card">
-      <label class="check" style="margin-top:0"><input type="checkbox" id="chkLatino" ${ajustes.latino ? 'checked' : ''}> Mostrar acordes en cifrado latino (Do, Re, Mi…)</label>
+      <b>🎨 Apariencia</b>
+      <div class="seg" id="segTema">${[['auto', '📱 Automático'], ['claro', '☀️ Claro'], ['oscuro', '🌙 Oscuro']].map(([k, v]) =>
+        `<button type="button" data-tema="${k}" class="${(ajustes.tema || 'auto') === k ? 'activo' : ''}">${v}</button>`).join('')}</div>
+      <label class="check"><input type="checkbox" id="chkLatino" ${ajustes.latino ? 'checked' : ''}> Mostrar acordes en cifrado latino (Do, Re, Mi…)</label>
     </div>
+    <div class="card" id="cardTonos"></div>
     <div id="cardNotif"></div>
     <div id="cardIndisp"></div>
     ${!standalone ? `<div class="card instalar">
@@ -2605,6 +2679,12 @@ function vistaPerfil() {
     });
   };
   $('#chkLatino').onchange = e => { ajustes.latino = e.target.checked; guardarAjustes(); toast('Listo'); };
+  $('#segTema').onclick = e => {
+    const b = e.target.closest('[data-tema]'); if (!b) return;
+    ajustes.tema = b.dataset.tema; guardarAjustes(); aplicarTema();
+    $('#segTema').querySelectorAll('button').forEach(x => x.classList.toggle('activo', x === b));
+  };
+  pintarMisTonos();
   $('#bClave').onclick = modalNuevaClave;
   $('#bSalir').onclick = async () => { await idb.limpiar(); await sb.auth.signOut(); location.hash = ''; };
   $('#bOffline').onclick = e => descargarSinConexion(e.currentTarget);
@@ -2617,6 +2697,103 @@ function vistaPerfil() {
   };
 }
 
+
+// =====================================================================
+// TONOS POR CANTANTE (Mi perfil y Equipo)
+// =====================================================================
+async function cargarTonosDe(perfilId) {
+  const { data, error } = await conCache('tonosDe:' + perfilId,
+    sb.from('tonos_cantante').select('id, tono, notas, updated_at, cancion_id, cancion:canciones(id, titulo, artista, tono_original)').eq('cantante_id', perfilId));
+  if (error) throw error;
+  return (data || []).filter(t => t.cancion).sort((a, b) => a.cancion.titulo.localeCompare(b.cancion.titulo));
+}
+
+const filaTono = (t, extra = '') => `
+  <div class="item" data-tono="${t.id}">
+    <span class="tono-pill">${esc(tonoTxt(t.tono))}</span>
+    <div class="info"><b>${esc(t.cancion.titulo)}</b><small>Original ${esc(tonoTxt(t.cancion.tono_original))}${t.notas ? ' · ' + esc(t.notas) : ''}</small></div>
+    ${extra}
+  </div>`;
+
+async function pintarMisTonos() {
+  const card = $('#cardTonos');
+  if (!card) return;
+  card.innerHTML = '<b>🎤 Mis tonos</b><p class="ayuda">Cargando…</p>';
+  let tonos;
+  try { tonos = await cargarTonosDe(st.uid); } catch (e) { card.innerHTML = '<b>🎤 Mis tonos</b><p class="ayuda">No se pudieron cargar.</p>'; return; }
+  if (!$('#cardTonos')) return;
+  if (!tonos.length && st.perfil.instrumento !== 'voz') { card.remove(); return; }
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center"><b>🎤 Mis tonos (${tonos.length})</b>
+      <button class="btn sm" id="bTonos" style="margin:0">✏️ Gestionar</button></div>
+    <p class="ayuda" style="margin:4px 0 10px">Cuando te asignen una canción en un día, se usa tu tono guardado. Un administrador también puede ajustarlo.</p>
+    <div class="lista">${tonos.map(filaTono).join('') || '<p class="ayuda">Aún no tienes tonos guardados.</p>'}</div>`;
+  $('#bTonos').onclick = () => modalTonosDe(st.uid, pintarMisTonos);
+  card.querySelectorAll('[data-tono]').forEach(el => (el.onclick = () => modalTonosDe(st.uid, pintarMisTonos, el.dataset.tono)));
+}
+
+/** Lista y edita los tonos de un cantante. Lo usa el propio cantante (Mi perfil) o un admin (Equipo). */
+async function modalTonosDe(perfilId, alCambiar = () => {}, tonoSel = null) {
+  const propio = perfilId === st.uid;
+  if (!propio && !esAdmin()) return;
+  let tonos, canciones;
+  try {
+    const [t, rc] = await Promise.all([cargarTonosDe(perfilId), conCache('canciones:min', sb.from('canciones').select('id, titulo, artista, tono_original').order('titulo'))]);
+    if (rc.error) throw rc.error;
+    tonos = t; canciones = rc.data || [];
+  } catch (e) { return fallo(e, 'Tonos'); }
+  const body = abrirModal(propio ? 'Mis tonos' : `Tonos de ${nombreDe(perfilId)}`, `
+    <p class="ayuda" style="margin-top:0">Toca una canción para cambiar su tono. Se aplica también a los próximos días donde ${propio ? 'te toque' : 'le toque'} cantarla.</p>
+    <div class="lista" id="lTonos">${tonos.map(t => filaTono(t, `<button class="btn-ico" data-borrar="${t.id}" aria-label="Eliminar">🗑️</button>`)).join('') || '<p class="ayuda">Aún no hay tonos guardados.</p>'}</div>
+    <form id="fTonoDe" style="margin-top:12px">
+      <label>Canción</label>
+      <select name="cancion_id" required><option value="">Elige…</option>${canciones.map(c =>
+        `<option value="${c.id}">${esc(c.titulo)}${c.artista ? ' — ' + esc(c.artista) : ''}</option>`).join('')}</select>
+      <div class="fila">
+        <div><label>Tono</label><select name="tono" required>${opcionesTono('', TODOS_LOS_TONOS, 'Elige…')}</select></div>
+        <div><label>Original</label><input id="tOrig" disabled value="—"></div>
+      </div>
+      <label>Nota (opcional)</label><input name="notas" maxlength="200" placeholder="Ej: con capo 2, baja en el puente">
+      <button class="btn prim blk">Guardar tono</button>
+    </form>`);
+  const form = $('#fTonoDe', body);
+  const precargar = () => {
+    const c = canciones.find(x => x.id === form.cancion_id.value);
+    const t = tonos.find(x => x.cancion_id === form.cancion_id.value);
+    $('#tOrig', body).value = c ? tonoTxt(c.tono_original) : '—';
+    form.tono.value = t?.tono || c?.tono_original || '';
+    form.notas.value = t?.notas || '';
+  };
+  form.cancion_id.onchange = precargar;
+  const elegir = id => {
+    const t = tonos.find(x => x.id === id); if (!t) return;
+    form.cancion_id.value = t.cancion_id; precargar();
+    form.scrollIntoView({ behavior: 'smooth', block: 'end' }); form.tono.focus();
+  };
+  if (tonoSel) elegir(tonoSel);
+  $('#lTonos', body).onclick = async e => {
+    const b = e.target.closest('[data-borrar]');
+    if (b) {
+      if (!confirm('¿Eliminar este tono guardado?')) return;
+      const { error } = await sb.from('tonos_cantante').delete().eq('id', b.dataset.borrar);
+      if (error) return fallo(error, 'Tono');
+      toast('Tono eliminado'); cerrarModal(); alCambiar(); return;
+    }
+    const fila = e.target.closest('[data-tono]');
+    if (fila) elegir(fila.dataset.tono);
+  };
+  form.onsubmit = e => {
+    e.preventDefault();
+    ocupado(form.querySelector('button'), async () => {
+      const f = Object.fromEntries(new FormData(form));
+      const { error } = await sb.from('tonos_cantante').upsert(
+        { cancion_id: f.cancion_id, cantante_id: perfilId, tono: f.tono, notas: f.notas.trim() || null },
+        { onConflict: 'cancion_id,cantante_id' });
+      if (error) return fallo(error, 'Tono');
+      toast('Tono guardado · aplicado a los próximos días'); cerrarModal(); alCambiar();
+    });
+  };
+}
 
 // =====================================================================
 // MENCIONES
