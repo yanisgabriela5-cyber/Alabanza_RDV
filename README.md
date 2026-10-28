@@ -6,7 +6,15 @@ App web instalable (PWA) para el equipo de alabanza: muro, canciones con acordes
 - **Backend:** Supabase (login, base de datos, imágenes, tiempo real).
 
 ## Puesta en marcha
-1. **Base de datos:** Supabase → SQL Editor → pegar `supabase/schema.sql` → Run. Luego, cada uno en su propia query y en orden: `supabase/002_agenda.sql` y `supabase/003_partituras.sql` → Run.
+1. **Base de datos:** Supabase → SQL Editor → una query por archivo, en este orden → Run:
+   1. `supabase/schema.sql`
+   2. `supabase/002_agenda.sql`
+   3. `supabase/003_partituras.sql`
+   4. `supabase/004_voz_dirige_chat.sql`
+   5. `supabase/007_menciones_push.sql`
+   6. `supabase/008_push_avisos.sql` (antes, cambiar `CAMBIA_ESTE_SECRETO` por el valor de `PUSH_SECRET`; requiere la Edge Function `push` publicada)
+
+   No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
 2. **GitHub Pages:** Settings → Pages → Source: *Deploy from a branch* → `main` / `(root)`.
 3. **URLs en Supabase:** Authentication → URL Configuration
    - *Site URL:* la URL de GitHub Pages (ej. `https://usuario.github.io/app-banda/`)
@@ -38,8 +46,23 @@ App web instalable (PWA) para el equipo de alabanza: muro, canciones con acordes
 - También acepta acordes en la línea de arriba (formato clásico copiado de internet).
 - Una línea que termina en `:` (`Coro:`) se muestra como sección.
 
+## Estructura
+```
+index.html, programa.html, manifest.webmanifest
+sw.js            service worker (debe ir en la raíz)
+css/styles.css
+js/app.js        toda la app
+js/programa.js   página pública del programa del día
+js/acordes.js    transposición
+js/cifrado.js    grilla de compases
+js/config.js     claves públicas, instrumentos, roles
+icons/
+supabase/        scripts SQL numerados
+```
+Al cambiar archivos de la app, subir la versión de `CACHE` en `sw.js` para que los celulares bajen la nueva.
+
 ## Configuración
-`js/config.js` contiene la URL y la **publishable key** de Supabase (pública por diseño). Nunca poner la secret key en este repositorio.
+`js/config.js` contiene la URL, la **publishable key** de Supabase y la clave **pública** VAPID (públicas por diseño). Nunca poner en este repositorio la secret key, la service_role, la clave privada VAPID ni `PUSH_SECRET`: van solo en Supabase → Edge Functions → Secrets.
 
 ## Agenda y modo en vivo
 - **Tipos y horarios** (⚙️ en Agenda): día, hora y ensayo predeterminado de cada tipo (Estudio bíblico, Servicio dominical, etc.).

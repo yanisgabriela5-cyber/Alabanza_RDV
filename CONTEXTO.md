@@ -17,7 +17,7 @@ Costo: **$0** (GitHub Pages + plan gratis de Supabase).
 | Primer admin | yanisgabriela12@gmail.com |
 
 ## Tecnología
-- HTML/CSS/JS puro, sin compilación. Archivos: `index.html`, `css/styles.css`, `js/app.js` (toda la app), `js/acordes.js` (transposición), `js/cifrado.js` (grilla de compases), `js/config.js` (claves, instrumentos, roles), `sw.js` (offline), `manifest.webmanifest`, `icons/` (logo Roca de Vida).
+- HTML/CSS/JS puro, sin compilación. Archivos: `index.html`, `programa.html`, `css/styles.css`, `js/app.js` (toda la app), `js/programa.js` (programa del día), `js/acordes.js` (transposición), `js/cifrado.js` (grilla de compases), `js/config.js` (claves públicas, instrumentos, roles), `sw.js` (offline y push, va en la raíz), `manifest.webmanifest`, `icons/` (logo Roca de Vida).
 - Supabase: login con correo/contraseña, base de datos Postgres con seguridad RLS, almacenamiento de imágenes (bucket `media`, 10 MB) y tiempo real.
 - Librería: `@supabase/supabase-js@2.45.4` desde jsDelivr.
 - Tema oscuro, dorado como color de acento.
@@ -26,8 +26,11 @@ Costo: **$0** (GitHub Pages + plan gratis de Supabase).
 1. `schema.sql` ✅ ejecutado: profiles, publicaciones, comentarios, reacciones, canciones, notas_cancion, tonos_cantante, setlists, setlist_items, bucket `media`.
 2. `002_agenda.sql` ⏳ **confirmar si se ejecutó**: tipos_evento, asignaciones, en_vivo, columnas `tipo_evento_id` y `ensayo_fecha` en setlists, `setlist_id` y tipo `programa` en publicaciones.
 3. `003_partituras.sql` ⏳ **confirmar si se ejecutó**: tabla partituras + bucket `partituras`.
+4. `004_voz_dirige_chat.sql` ⏳ **confirmar si se ejecutó**: Voz unificada, marca Dirige, chat por evento, cifrado por canción.
+5. `007_menciones_push.sql` ⏳ **confirmar si se ejecutó**: menciones en el chat, indisponibilidad por fechas, historial de canciones, metrónomo, suscripciones push.
+6. `008_push_avisos.sql` ⏳ **confirmar si se ejecutó**: disparadores de push (requiere la Edge Function `push` y el secreto `PUSH_SECRET`).
 
-Ambos scripts se pueden volver a ejecutar sin borrar datos.
+No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
 
 ## Permisos
 - **Registro abierto, con aprobación:** quien se registra queda *pendiente* hasta que un admin lo aprueba en la pestaña **Equipo**.
@@ -59,7 +62,8 @@ Ambos scripts se pueden volver a ejecutar sin borrar datos.
 8. **Equipo:** integrantes por instrumento; aprobar, nombrar admin, desactivar.
 
 ## Pendientes / próximos pasos
-- [ ] Confirmar que se ejecutaron `002_agenda.sql` y `003_partituras.sql`.
+- [ ] Confirmar que se ejecutaron los scripts 002, 003, 004, 007 y 008.
+- [ ] Subir al repo el código de la Edge Function `push` (sin secretos) para no depender solo de Supabase.
 - [ ] Desactivar "Confirm email" en Supabase (Authentication → Sign In / Providers → Email) por el límite de correos.
 - [ ] Configurar en Supabase → Authentication → URL Configuration: Site URL y Redirect URL = `https://yanisgabriela5-cyber.github.io/Alabanza_RDV/`
 - [ ] Definir el día y la hora de ensayo del Servicio dominical en ⚙️ Tipos y horarios.
@@ -70,7 +74,11 @@ Ambos scripts se pueden volver a ejecutar sin borrar datos.
 ## Instrumentos
 Voz, Piano / Teclado, Guitarra acústica, Guitarra eléctrica, Bajo, Batería, Percusión menor, Otro. ("Voz principal" y "Coros" se unificaron en "Voz".)
 
+## En progreso (base de datos lista, confirmar en la app)
+- Notificaciones push.
+- Menciones en el chat del día (@persona, @todos, @voces, @musicos, @admins).
+- Indisponibilidad por fechas.
+- Historial de canciones y metrónomo.
+
 ## Ideas no implementadas aún
-- Notificaciones push (recordatorio de días asignados).
-- Indisponibilidad por fechas (que cada uno marque días que no puede).
-- Adjuntar PDF o audio de referencia a las canciones.
+- Adjuntar audio de referencia a las canciones.
