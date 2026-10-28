@@ -46,7 +46,7 @@ function aplicarTema() {
   if (t === 'auto') delete document.documentElement.dataset.tema;
   else document.documentElement.dataset.tema = t;
   const claro = t === 'claro' || (t === 'auto' && mqClaro.matches);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', claro ? '#f5f3ee' : '#11131c');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', claro ? '#f5f3ee' : '#000000');
 }
 aplicarTema();
 mqClaro.addEventListener?.('change', aplicarTema);
