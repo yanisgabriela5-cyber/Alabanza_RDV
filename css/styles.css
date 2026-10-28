@@ -189,10 +189,20 @@ textarea.letra { min-height: 300px; font-family: ui-monospace, SFMono-Regular, M
 
 /* ---------- canción ---------- */
 .cancion-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
-.controles { position: sticky; top: calc(62px + var(--safe-t)); z-index: 4; background: var(--bg); padding: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--linea); margin-bottom: 12px; }
+.controles { position: sticky; top: calc(62px + var(--safe-t)); z-index: 4; background: var(--bg); padding: 8px 0; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid var(--linea); margin-bottom: 12px; }
 .controles .tono-actual { display: flex; align-items: center; gap: 6px; }
-.controles .tono-actual select { width: auto; padding: 7px 8px; font-weight: 800; color: var(--acento-2); }
-.controles .sep { flex: 1; }
+.controles .tono-actual { background: var(--card); border: 1px solid var(--linea); border-radius: 12px; padding: 3px; gap: 2px; flex: none; }
+.controles .tono-actual .btn-ico { border: 0; background: transparent; width: 34px; height: 34px; }
+.controles .tono-actual select { width: auto; min-width: 64px; padding: 6px 8px; font-weight: 800; font-size: 17px; text-align: center; color: var(--acento-2); background: transparent; border: 0; }
+.sel-cant { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--linea); border-radius: 12px; padding: 0 0 0 10px; margin: 0; }
+.sel-cant.activo { border-color: var(--acento); }
+.sel-cant select { flex: 1; min-width: 0; width: auto; border: 0; background: transparent; padding: 10px 8px 10px 0; font-size: 14px; font-weight: 600; color: var(--texto); text-overflow: ellipsis; }
+.sel-cant.activo select { color: var(--acento-2); }
+.barra-vista { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.barra-vista .vista-tg { margin: 0; }
+.btn-ico.sm.activo { border-color: var(--acento); background: rgba(224, 180, 88, .14); }
+.ov-fuente { display: inline-flex; gap: 4px; margin-left: auto; }
+.btn-ico.sm { width: 32px; height: 32px; font-size: 13px; }
 .cantantes { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
 .chip { border: 1px solid var(--linea); background: var(--bg-2); color: var(--texto); padding: 6px 11px; border-radius: 20px; font: inherit; font-size: 13px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
 .chip b { color: var(--acento-2); }

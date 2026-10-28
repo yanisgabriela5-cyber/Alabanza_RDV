@@ -910,35 +910,49 @@ async function vistaCancion(ctx) {
       <div class="cancion-meta">${meta}</div>
       ${itemSet?.notas ? `<div class="card" style="padding:10px 12px">📝 ${esc(itemSet.notas)}</div>` : ''}
       <div class="controles">
-        <div class="tono-actual">
+        <div class="tono-actual" role="group" aria-label="Tono">
           <button class="btn-ico" data-acc="bajar" aria-label="Bajar medio tono">−</button>
           ${original
-            ? `<select id="selTono" aria-label="Tono">${lista.map(t => `<option value="${t}" ${t === actual ? 'selected' : ''}>${esc(tonoTxt(t))}</option>`).join('')}</select>`
+            ? `<select id="selTono" class="sel-tono" aria-label="Tono">${lista.map(t => `<option value="${t}" ${t === actual ? 'selected' : ''}>${esc(tonoTxt(t))}</option>`).join('')}</select>`
             : `<span class="tono-pill">${semis > 0 ? '+' : ''}${semis}</span>`}
           <button class="btn-ico" data-acc="subir" aria-label="Subir medio tono">+</button>
         </div>
-        <span class="sep"></span>
-        <button class="btn-ico" data-acc="acordes" title="Mostrar/ocultar acordes" style="${ajustes.acordes ? '' : 'opacity:.45'}">🎸</button>
-        <button class="btn-ico" data-acc="fuente-" aria-label="Letra más pequeña" style="font-size:13px">A−</button>
-        <button class="btn-ico" data-acc="fuente+" aria-label="Letra más grande">A+</button>
+        ${original ? (() => {
+          const ops = [{ v: 'o', t: original, txt: `${tonoTxt(original)} · Original` },
+            ...tonos.filter(t => parseTono(t.tono)).map(t => ({ v: 'c:' + t.cantante_id, t: t.tono, id: t.cantante_id,
+              txt: `${tonoTxt(t.tono)} · ${nombreDe(t.cantante_id)}${itemSet?.cantante_id === t.cantante_id ? ' (hoy)' : ''}` }))];
+          const coincide = o => distancia(original, o.t) === semis;
+          const sel = ops.find(o => o.id && o.id === itemSet?.cantante_id && coincide(o))
+            || (semis === 0 ? ops[0] : ops.find(o => o.id && coincide(o)));
+          return `<label class="sel-cant${sel && sel.v !== 'o' ? ' activo' : ''}">
+            <span aria-hidden="true">🎤</span>
+            <select id="selCant" aria-label="Tono por cantante">
+              ${ops.map(o => `<option value="${esc(o.v)}" ${o === sel ? 'selected' : ''}>${esc(o.txt)}</option>`).join('')}
+              ${sel ? '' : '<option value="" selected disabled>Tono libre</option>'}
+              ${puedeTonos() ? `<option value="+">${tonos.length ? '✏️ Editar tonos…' : '＋ Guardar mi tono…'}</option>` : ''}
+            </select></label>`;
+        })() : ''}
       </div>
       ${htmlMetro(c)}
-      ${original ? `<div class="cantantes">
-        <button class="chip ${semis === 0 ? 'activo' : ''}" data-acc="tono" data-tono="${esc(original)}">Original <b>${esc(tonoTxt(original))}</b></button>
-        ${tonos.map(t => `<button class="chip ${parseTono(t.tono) && distancia(original, t.tono) === semis && semis !== 0 ? 'activo' : ''}" data-acc="tono" data-tono="${esc(t.tono)}" title="${esc(t.notas || '')}">${esc(nombreDe(t.cantante_id))} <b>${esc(tonoTxt(t.tono))}</b></button>`).join('')}
-        ${puedeTonos() ? `<button class="chip" data-acc="tonos">🎤 ${tonos.length ? 'Tonos' : 'Guardar tono'}</button>` : ''}
-      </div>
+      ${original ? `
       ${setId && itemSet && esAdmin() && actual && actual !== (itemSet.tono || original) ? `<div class="card guardar-tono">
         <span>Tono de este día: <b>${esc(tonoTxt(itemSet.tono || original))}</b> → <b>${esc(tonoTxt(actual))}</b></span>
         <button class="btn prim sm" data-acc="guardar-tono-dia">💾 Guardar${itemSet.cantante_id ? ` para ${esc(nombreCorto(itemSet.cantante_id))}` : ''}</button>
       </div>` : ''}` : (esAdmin() ? `<p class="ayuda">Define el tono original (✏️) para poder guardar tonos por cantante.</p>` : '')}
       ${misNotas.map(([k, v]) => `<div class="card nota-mia"><b>📝 ${esc(k)}:</b> ${esc(v)}</div>`).join('')}
       ${partituras.some(p => p.instrumento === miInstr) ? `<button class="btn sm" style="margin-bottom:10px" data-acc="ver-part" data-instr="${esc(miInstr)}">📄 Ver mi partitura (${esc(INSTRUMENTOS[miInstr] || miInstr)})</button>` : ''}
+      <div class="barra-vista">
       ${c.letra || c.cifrado || esAdmin() ? `<div class="segmentado vista-tg">
         <button data-acc="vista" data-v="letra" class="${verCifrado ? '' : 'activo'}">📝 Letra</button>
         <button data-acc="vista" data-v="cifrado" class="${verCifrado ? 'activo' : ''}">🎼 Cifrado</button>
         ${verCifrado && esAdmin() ? '<button data-acc="editar-cifrado">✏️ Ajustar</button>' : ''}
       </div>` : ''}
+      ${c.letra || c.cifrado ? `<span class="ov-fuente" role="group" aria-label="Opciones de lectura">
+          ${verCifrado ? '' : `<button class="btn-ico sm ${ajustes.acordes ? 'activo' : ''}" data-acc="acordes" aria-pressed="${ajustes.acordes}" title="Mostrar u ocultar acordes">🎸</button>`}
+          <button class="btn-ico sm" data-acc="fuente-" aria-label="Letra más pequeña">A−</button>
+          <button class="btn-ico sm" data-acc="fuente+" aria-label="Letra más grande">A+</button>
+        </span>` : ''}
+      </div>
       ${verCifrado ? (() => {
         const texto = c.cifrado || generarCifrado(c.letra);
         const grilla = texto ? renderCifrado(texto, { semis, bemoles: bem, latino: ajustes.latino }) : '';
@@ -1013,6 +1027,13 @@ async function vistaCancion(ctx) {
 
   app.onchange = e => {
     if (e.target.id === 'selTono') { semis = distancia(original, e.target.value); pintar(); }
+    else if (e.target.id === 'selCant') {
+      const v = e.target.value;
+      if (v === '+') { pintar(); modalTonos(c, tonos, () => rutear(), itemSet?.cantante_id); return; }
+      if (v === 'o') semis = 0;
+      else if (v.startsWith('c:')) { const t = tonos.find(x => x.cantante_id === v.slice(2)); if (t) semis = distancia(original, t.tono); }
+      pintar();
+    }
   };
   app.onclick = async e => {
     const el = e.target.closest('[data-acc]');
