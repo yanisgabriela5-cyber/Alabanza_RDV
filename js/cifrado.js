@@ -11,7 +11,7 @@
 // - Cada "|" separa compases. Varios acordes en un compás: separados por espacio.
 // - "%" repite el compás anterior. Cada renglón empieza una fila nueva (4 compases por fila).
 
-import { transponerAcorde, esAcorde, esLineaDeAcordes, etiquetaSeccion, aCorchetes } from './acordes.js';
+import { transponerAcorde, esAcorde, esLineaDeAcordes, etiquetaSeccion, aCorchetes, cifrado as notaLatina } from './acordes.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const POR_FILA = 4;
@@ -139,10 +139,15 @@ const MARCA = { coda: '⊕', segno: '§', fermata: '⌒' };
 export function renderCifrado(texto, { semis = 0, bemoles = false, latino = false } = {}) {
   const secs = parseCifrado(texto);
   if (!secs.length) return '';
-  const t = a => (esAcorde(a) ? transponerAcorde(a, semis, bemoles, latino) : a);
+  // Sin transponer se respeta cómo está escrito (Bb sigue siendo Bb, no A#)
+  const t = a => (!esAcorde(a) ? a
+    : semis ? transponerAcorde(a, semis, bemoles, latino)
+    : latino ? a.replace(/^([A-G])/, m => notaLatina(m, true)).replace(/\/([A-G])/, (_, m) => '/' + notaLatina(m, true)) : a);
   const comp = c => {
     if (!c) return '<div class="cf-comp vacio"></div>';
-    const cls = ['cf-comp', c.ac.length > 1 && !c.repite ? 'multi' : '', c.izq ? 'izq-' + c.izq : '', c.der ? 'der-' + c.der : '', c.casilla ? 'casilla' : ''].filter(Boolean).join(' ');
+    // en pantallas angostas los acordes largos se achican para no salirse del compás
+    const largo = c.repite ? 0 : c.ac.reduce((n, a) => n + a.length, 0) + (c.ac.length - 1) * 2;
+    const cls = ['cf-comp', c.ac.length > 1 && !c.repite ? 'multi' : '', largo > 11 ? 'apretado' : largo > 7 ? 'largo' : '', c.izq ? 'izq-' + c.izq : '', c.der ? 'der-' + c.der : '', c.casilla ? 'casilla' : ''].filter(Boolean).join(' ');
     const centro = c.repite === 1 ? '<span class="cf-sim" title="Repite el compás anterior">𝄎</span>'
       : c.repite === 2 ? '<span class="cf-sim cf-sim2" title="Repite los dos compases anteriores">𝄏</span>'
       : c.repite === 3 ? ''

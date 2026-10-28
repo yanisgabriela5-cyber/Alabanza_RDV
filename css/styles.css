@@ -413,7 +413,7 @@ table.plan { border-collapse: collapse; font-size: 13px; min-width: 100%; }
 .cf-comp.multi .cf-ac { font-size: 1.15em; }
 .cf-raiz sup { font-size: .55em; vertical-align: .55em; }
 .cf-cal { font-size: .5em; vertical-align: -.05em; margin-left: .03em; }
-.cf-bajo { display: inline-block; font-size: .5em; position: relative; top: .55em; margin-left: .05em; color: var(--texto-2); }
+.cf-bajo { display: inline-block; font-size: .55em; margin-left: .04em; color: var(--texto-2); }
 .cf-sim { font-size: 1.4em; color: var(--texto-2); }
 /* símbolos estilo iReal */
 .cf-comp { position: relative; }
@@ -430,7 +430,7 @@ table.plan { border-collapse: collapse; font-size: 13px; min-width: 100%; }
 .cf-bar.der.rep { width: 4px; border-left: 0; }
 .cf-bar.der.rep::after { right: 5px; }
 .cf-comp.izq-rep, .cf-comp.izq-doble { padding-left: .55em; }
-.cf-comp.der-rep, .cf-comp.der-doble, .cf-comp.der-fin { padding-right: .7em; }
+.cf-comp.der-rep, .cf-comp.der-doble, .cf-comp.der-fin { padding-right: .85em; }
 .cf-comp.casilla { border-top: 2px solid var(--cf-linea); padding-top: .55em; }
 .cf-casilla { position: absolute; top: .05em; left: .3em; font-size: .5em; font-weight: 700; color: var(--texto-2); }
 .cf-marca { position: absolute; top: -.05em; right: .3em; font-size: .7em; font-weight: 700; line-height: 1; color: var(--acento); }
@@ -692,3 +692,13 @@ dialog::backdrop { background: rgba(0, 0, 0, .7); }
 .fab { box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
 .fecha-box, .nota-vista, .mis-nota, .comentario .burbuja { background: var(--card-2); }
 .mis-conf .btn { font-size: 13px; padding: 9px 4px; line-height: 1.2; }
+.cf-comp { min-width: 0; }
+.cf-comp.largo .cf-ac { font-size: 1.3em; }
+.cf-comp.multi.largo .cf-ac { font-size: 1.05em; }
+.cf-comp.apretado .cf-ac { font-size: 1.05em; }
+.cf-comp.multi.apretado .cf-ac { font-size: .9em; letter-spacing: -.04em; }
+.cf-comp.multi { gap: .2em; }
+@media (max-width: 420px) {
+  .cf-comp { padding: .1em .18em; }
+  .cf-comp.multi.apretado .cf-ac { font-size: .82em; }
+}
