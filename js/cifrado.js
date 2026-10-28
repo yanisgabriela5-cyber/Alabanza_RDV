@@ -200,8 +200,12 @@ export function acordeDeIreal(a) {
 /** Música de iReal → texto de cifrado de la app */
 function musicaAApp(musica) {
   // quitar acordes alternativos (entre paréntesis) y marcas de formato que no usamos
-  let m = musica.replace(/\([^)]*\)/g, ' ').replace(/,/g, ' ');
-  const toks = m.match(/<[^>]*>|\*[A-Za-z]|[{}\[\]|]|T\d\d|N[1-3]|[^\s{}\[\]|<>*]+/g) || [];
+  let m = musica.replace(/\([^)]*\)/g, ' ').replace(/,/g, ' ')
+    // "*" pegado a la raíz del acorde (D*m) no es sección: se quita para que quede Dm
+    .replace(/([A-G][#b]?)\*(?=[a-z0-9^+\-])/g, '$1')
+    // códigos de posición de iReal dentro de comentarios: <*69x3> → <x3>
+    .replace(/<\s*\*\d{2}\s*/g, '<');
+  const toks = m.match(/<[^>]*>|\*[A-Za-z](?![a-z])|[{}\[\]|]|T\d\d|N[1-3]|[^\s{}\[\]|<>*]+/g) || [];
   const NOM = { i: 'I Intro', v: 'V Verso', V: 'V Verso', A: 'A', B: 'B', C: 'C', D: 'D' };
   const lineas = [];
   let linea = [];
@@ -214,6 +218,8 @@ function musicaAApp(musica) {
       corte(); lineas.push('*' + (NOM[t[1]] || t[1].toUpperCase())); linea = pasa; continue;
     }
     if (t === 'Y' || t === 'YY' || t === 'YYY' || t === 'U') { corte(); continue; }
+    // una doble barra de inicio a mitad de línea abre un bloque nuevo ("a parte A", "Final"…): renglón nuevo
+    if (t === '[' && linea.some(x => x !== '{' && !/^T\d\d$/.test(x))) corte();
     if (t[0] === '<' || /^[{}\[\]|]$/.test(t) || /^T\d\d$/.test(t) || /^N[1-3]$/.test(t) || ['Q', 'S', 'f', 'x', 'r', 'n', 'p', 'Z'].includes(t)) { linea.push(t); continue; }
     // quitar prefijos de tamaño (s = chico, l = grande) pegados al acorde
     t = t.replace(/^[sl](?=[A-GWnpx])/, '');
