@@ -32,6 +32,8 @@ Costo: **$0** (GitHub Pages + plan gratis de Supabase).
 
 7. `009_confirmaciones_recordatorios.sql` ⏳ **ejecutar**: estado Por confirmar, grupo @pendientes, recordatorio manual (`recordar_pendientes`) y automático (cron `recordar-confirmacion`, 9:00 am, a 7/3/1 días).
 
+8. `010_reemplazos_calendario.sql` ⏳ **ejecutar**: aviso a @admins al marcar No puedo (trigger `avisar_rechazo`) y tokens de calendario (`calendario_tokens`, `mi_token_calendario`). Además publicar la Edge Function `calendario` (Verify JWT desactivado).
+
 No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
 
 ## Permisos

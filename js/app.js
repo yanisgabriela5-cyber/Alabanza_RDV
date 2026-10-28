@@ -2330,12 +2330,12 @@ async function vistaDia(ctx) {
   const mios = misRoles(s);
   const estadoMio = mios.every(a => a.estado === mios[0]?.estado) ? mios[0]?.estado : '';
   const personas = est => new Set(s.asignaciones.filter(a => a.estado === est).map(a => a.perfil_id)).size;
-  const nSinResp = personas('pendiente'), nPorConf = personas('por_confirmar');
+  const nSinResp = personas('pendiente'), nPorConf = personas('por_confirmar'), nNo = personas('rechazado');
   const aRecordar = new Set(s.asignaciones.filter(a => SIN_CONFIRMAR.includes(a.estado) && a.perfil_id !== st.uid).map(a => a.perfil_id)).size;
   const resumenConf = esAdmin() && s.asignaciones.length && !st.faltaV2 ? `<div class="card resumen-conf">
       <div class="info">${nSinResp || nPorConf
         ? `${nSinResp ? `⏳ <b>${nSinResp}</b> sin responder` : ''}${nSinResp && nPorConf ? ' · ' : ''}${nPorConf ? `🤔 <b>${nPorConf}</b> por confirmar` : ''}`
-        : '✅ Todo el equipo respondió'}</div>
+        : '✅ Todo el equipo respondió'}${nNo ? `<br>❌ <b>${nNo}</b> no ${nNo > 1 ? 'pueden' : 'puede'} · toca 🔄 para buscar reemplazo` : ''}</div>
       ${aRecordar && !st.faltaV7 ? `<button class="btn sm" data-acc="recordar">🔔 Recordar (${aRecordar})</button>` : ''}
     </div>` : '';
 
@@ -2343,7 +2343,7 @@ async function vistaDia(ctx) {
     const as = s.asignaciones.filter(a => roles.includes(a.rol)).sort(ordenAsig);
     return `<div class="seccion-t">${titulo}</div>` + (as.length
       ? `<div class="card equipo-dia">${as.map(a => `<div class="eq-fila ${a.estado}">
-          <span class="eq-rol">${esc(etiquetaRol(a))}</span><b>${esc(nombreDe(a.perfil_id))}</b><span title="${TXT_ESTADO[a.estado] || a.estado}">${ICON_ESTADO[a.estado] || ''}</span>${esAdmin() && SIN_CONFIRMAR.includes(a.estado) && a.perfil_id !== st.uid && !st.faltaV7 ? `<button class="eq-rec" data-acc="recordar-uno" data-perfil="${a.perfil_id}" title="Enviar recordatorio" aria-label="Enviar recordatorio">🔔</button>` : ''}</div>`).join('')}</div>`
+          <span class="eq-rol">${esc(etiquetaRol(a))}</span><b>${esc(nombreDe(a.perfil_id))}</b><span title="${TXT_ESTADO[a.estado] || a.estado}">${ICON_ESTADO[a.estado] || ''}</span>${esAdmin() && SIN_CONFIRMAR.includes(a.estado) && a.perfil_id !== st.uid && !st.faltaV7 ? `<button class="eq-rec" data-acc="recordar-uno" data-perfil="${a.perfil_id}" title="Enviar recordatorio" aria-label="Enviar recordatorio">🔔</button>` : ''}${esAdmin() && a.estado === 'rechazado' ? `<button class="eq-rec" data-acc="reemplazar" data-asig="${a.id}" title="Buscar reemplazo" aria-label="Buscar reemplazo">🔄</button>` : ''}</div>`).join('')}</div>`
       : '<p class="ayuda">Sin asignar.</p>');
   };
 
@@ -2451,6 +2451,7 @@ async function vistaDia(ctx) {
         if (error) { if (avisoV9(error)) return; throw error; }
         toast(TOAST_ESTADO[el.dataset.estado]); actualizarBadgeMis(); rutear();
       }
+      else if (acc === 'reemplazar') modalReemplazo(s, s.asignaciones.find(a => a.id === el.dataset.asig));
       else if (acc === 'recordar' || acc === 'recordar-uno') {
         const uno = acc === 'recordar-uno' ? el.dataset.perfil : null;
         const quien = uno ? nombreDe(uno) : `${aRecordar} persona${aRecordar === 1 ? '' : 's'} sin confirmar`;
@@ -2585,7 +2586,8 @@ async function vistaMis(ctx) {
     </article>`;
   };
 
-  app.innerHTML = encabezado('Mis días', { sub: proximos.length ? `${proximos.length} próximo${proximos.length > 1 ? 's' : ''}` : '' }) + `
+  app.innerHTML = encabezado('Mis días', { sub: proximos.length ? `${proximos.length} próximo${proximos.length > 1 ? 's' : ''}` : '',
+    derecha: '<button class="btn-ico" data-acc="calendario" aria-label="Agregar a mi calendario" title="Agregar a mi calendario">📅</button>' }) + `
     ${porResponder ? `<div class="card aviso-mis">⏳ Tienes <b>${porResponder}</b> día${porResponder > 1 ? 's' : ''} por responder. Marca si puedes servir.</div>` : ''}
     ${proximos.map(tarjeta).join('') || `<div class="vacio"><span class="grande">🙌</span>No tienes días asignados próximamente.<br><a href="#/agenda">Ver la agenda</a></div>`}
     ${pasados.length ? `<details class="mis-pasados"><summary>Días anteriores (${pasados.length})</summary>
@@ -2599,12 +2601,93 @@ async function vistaMis(ctx) {
         const { error } = await sb.from('asignaciones').update({ estado: el.dataset.estado }).in('id', el.dataset.ids.split(','));
         if (error) { if (avisoV9(error)) return; throw error; }
         toast(TOAST_ESTADO[el.dataset.estado]); actualizarBadgeMis(); rutear();
+      } else if (el.dataset.acc === 'calendario') {
+        modalCalendario();
       } else if (el.dataset.acc === 'offline') {
         const d = dias.get(el.dataset.id);
         await ocupado(el, () => guardarDiaOffline(d.s, d.items));
       }
     } catch (err) { fallo(err, 'Mis días'); }
   };
+}
+
+
+/** Sugerencias para reemplazar a quien no puede: mismo instrumento, disponible y con menos participación. */
+async function modalReemplazo(s, a) {
+  if (!a) return;
+  const body = abrirModal(`Reemplazo · ${ROLES[a.rol] || a.rol}`, '<div class="spinner"></div>');
+  const f = new Date(s.fecha), k = claveDia(f);
+  const ini = isoSinMs(new Date(f.getFullYear(), f.getMonth(), 1)), fin = isoSinMs(new Date(f.getFullYear(), f.getMonth() + 1, 1));
+  const [ind, rm] = await Promise.all([
+    cargarIndisp(k, k),
+    sb.from('asignaciones').select('perfil_id, setlist:setlists!inner(fecha)').neq('estado', 'rechazado').gte('setlist.fecha', ini).lt('setlist.fecha', fin),
+  ]);
+  const veces = new Map();
+  (rm.data || []).forEach(x => veces.set(x.perfil_id, (veces.get(x.perfil_id) || 0) + 1));
+  const noDisp = new Map(ind.map(i => [i.perfil_id, i.motivo || 'No disponible']));
+  const ya = new Set(s.asignaciones.map(x => x.perfil_id));
+  const cands = aprobados().filter(p => !ya.has(p.id))
+    .sort((x, y) => noDisp.has(x.id) - noDisp.has(y.id) || (veces.get(x.id) || 0) - (veces.get(y.id) || 0) || x.nombre.localeCompare(y.nombre));
+  const mismo = cands.filter(p => p.instrumento === a.rol), otros = cands.filter(p => p.instrumento !== a.rol);
+  const fila = p => `<div class="item reemp">
+      <span class="avatar sm">${esc(iniciales(p.nombre))}</span>
+      <div class="info"><b>${esc(p.nombre)}</b>
+        <small>${esc(INSTRUMENTOS[p.instrumento] || 'Sin instrumento')} · ${veces.get(p.id) || 0} vez${(veces.get(p.id) || 0) === 1 ? '' : 'es'} este mes${noDisp.has(p.id) ? ` · 🚫 ${esc(noDisp.get(p.id))}` : ''}</small></div>
+      <button class="btn sm ${noDisp.has(p.id) ? '' : 'prim'}" data-reemp="${p.id}">Asignar</button>
+    </div>`;
+  body.innerHTML = `
+    <p class="ayuda" style="margin-top:0"><b>${esc(nombreDe(a.perfil_id))}</b> no puede el ${esc(fmtFechaLarga(s.fecha))}${a.dirige ? ' (dirigía)' : ''}. Primero quienes están disponibles y han servido menos este mes.</p>
+    <div class="seccion-t">${ICON_INSTR[a.rol] || '🎵'} ${esc(ROLES[a.rol] || a.rol)}</div>
+    <div class="lista">${mismo.map(fila).join('') || '<p class="ayuda">Nadie más tiene este instrumento en su perfil.</p>'}</div>
+    ${otros.length ? `<details class="mis-pasados"><summary>Otros integrantes (${otros.length})</summary><div class="lista">${otros.map(fila).join('')}</div></details>` : ''}`;
+  body.onclick = async e => {
+    const b = e.target.closest('[data-reemp]');
+    if (!b) return;
+    const p = st.perfiles.get(b.dataset.reemp);
+    if (noDisp.has(p.id) && !confirm(`${p.nombre} marcó que no está disponible ese día. ¿Asignar igual?`)) return;
+    await ocupado(b, async () => {
+      const fila = { setlist_id: s.id, perfil_id: p.id, rol: a.rol, estado: 'pendiente' };
+      if (!st.faltaV4) fila.dirige = !!a.dirige;
+      const { error } = await sb.from('asignaciones').insert(fila);
+      if (error) return fallo(error, 'Reemplazo');
+      cerrarModal(); toast(`Asignado a ${p.nombre}. Le llega el aviso para confirmar.`); rutear();
+    });
+  };
+}
+
+/** Link para suscribirse a "Mis días" desde el calendario del celular. */
+async function modalCalendario() {
+  const body = abrirModal('📅 Mis días en tu calendario', '<div class="spinner"></div>');
+  const pintar = async (nuevo = false) => {
+    const { data: token, error } = await sb.rpc('mi_token_calendario', { p_nuevo: nuevo });
+    if (error) {
+      body.innerHTML = `<p class="ayuda">${/mi_token_calendario|PGRST202/.test(error.message + error.code)
+        ? (esAdmin() ? 'Falta ejecutar <b>supabase/010_reemplazos_calendario.sql</b> y publicar la función <b>calendario</b> en Supabase.' : 'El calendario aún no está activado. Avísale a un administrador.')
+        : esc(error.message)}</p>`;
+      return;
+    }
+    const https = `${SUPABASE_URL}/functions/v1/calendario?t=${token}`;
+    const webcal = https.replace(/^https:/, 'webcal:');
+    body.innerHTML = `
+      <p class="ayuda" style="margin-top:0">Tus días de servicio y ensayos aparecen en el calendario del celular y se actualizan solos (el calendario revisa cada pocas horas). Los que faltan confirmar salen con ⏳.</p>
+      <div class="lista">
+        <a class="btn blk prim" href="${esc(webcal)}">📱 iPhone, iPad o Mac</a>
+        <a class="btn blk" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}" target="_blank" rel="noopener">Google Calendar (Android)</a>
+        <button class="btn blk" data-cal="copiar">📋 Copiar link (Outlook u otros)</button>
+      </div>
+      <p class="ayuda">En Android: abre el botón de Google en el navegador con tu cuenta de Google; después aparece en la app Calendario. Si no lo ves, activa el calendario «Alabanza RDV» en la lista de calendarios.</p>
+      <p class="ayuda">Este link es personal: no lo compartas. Si se filtró, <button class="btn sm" data-cal="nuevo">🔄 Cambiar link</button> (el anterior deja de funcionar).</p>`;
+    body.onclick = async e => {
+      const b = e.target.closest('[data-cal]');
+      if (!b) return;
+      if (b.dataset.cal === 'copiar') {
+        try { await navigator.clipboard.writeText(https); toast('Link copiado'); } catch { prompt('Copia este link:', https); }
+      } else if (b.dataset.cal === 'nuevo' && confirm('¿Cambiar el link? Tendrás que suscribirte de nuevo en tu calendario.')) {
+        body.innerHTML = '<div class="spinner"></div>'; await pintar(true); toast('Link nuevo listo');
+      }
+    };
+  };
+  pintar();
 }
 
 /** Deja un día listo para abrir sin internet: sus canciones, notas, tonos y partituras. */
