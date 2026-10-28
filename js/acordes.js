@@ -59,7 +59,7 @@ export function transponerTono(tono, semis) {
   return nombreNota(idx, bem) + (t.menor ? 'm' : '');
 }
 
-const RE_ACORDE = /^([A-G][#b]?)((?:maj|min|dim|aug|sus|add|m|M|°|ø|\+|-|#|b|\d|\(|\)|\.)*)(?:\/([A-G][#b]?))?$/;
+const RE_ACORDE = /^([A-G][#b]?)((?:maj|min|dim|aug|sus|add|alt|m|M|°|ø|\+|-|#|b|\d|\(|\)|\.)*)(?:\/([A-G][#b]?))?$/;
 
 export function esAcorde(tok) {
   return RE_ACORDE.test(tok);

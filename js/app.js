@@ -2,9 +2,9 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_KEY, APP_NOMBRE, INSTRUMENTOS, NOTAS_TABS, REACCIONES, ROLES, ROLES_CANTO, ICON_INSTR, VAPID_PUBLIC_KEY } from './config.js';
 import {
   TONOS_MAYORES, TONOS_MENORES, TODOS_LOS_TONOS, parseTono, usaBemoles, distancia,
-  transponerTono, renderLetra, primerAcorde, cifrado, esAcorde, acordesDelTono, aCorchetes,
+  transponerTono, renderLetra, primerAcorde, cifrado, esAcorde, acordesDelTono, aCorchetes, transponerAcorde,
 } from './acordes.js';
-import { generarCifrado, renderCifrado, erroresCifrado, AYUDA_CIFRADO } from './cifrado.js';
+import { generarCifrado, renderCifrado, erroresCifrado, AYUDA_CIFRADO, leerIreal } from './cifrado.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -231,6 +231,7 @@ async function arrancar(session) {
   if (!perfil || perfil.estado !== 'aprobado') { $('#nav').hidden = true; return vistaPendiente(); }
   await Promise.all([cargarPerfiles(), cargarTipos()]);
   iniciarGlobal();
+  actualizarBadgeMis();
   $('#nav').hidden = false;
   if (!location.hash || location.hash === '#' || location.hash === '#/') location.replace('#/muro');
   else rutear();
@@ -338,6 +339,7 @@ const RUTAS = {
   muro: vistaMuro,
   canciones: vistaCanciones,
   cancion: vistaCancion,
+  mis: vistaMis,
   agenda: vistaAgenda,
   ensayos: vistaAgenda,
   dia: vistaDia,
@@ -869,7 +871,8 @@ async function vistaCancion(ctx) {
   const idx = items ? Math.max(0, items.findIndex((it, i) => it.cancion_id === id && (ctx.q.get('i') == null || i === +ctx.q.get('i')))) : -1;
   const itemSet = items?.[idx];
   const vivo = !!(setId && ctx.q.get('vivo') === '1' && !st.faltaV2);
-  const irItem = i => { const it = items[i]; return `#/cancion/${it.cancion_id}?set=${setId}&i=${i}${it.tono ? '&tono=' + encodeURIComponent(it.tono) : ''}${vivo ? '&vivo=1' : ''}`; };
+  const volverMis = ctx.q.get('volver') === 'mis';
+  const irItem = i => { const it = items[i]; return `#/cancion/${it.cancion_id}?set=${setId}&i=${i}${it.tono ? '&tono=' + encodeURIComponent(it.tono) : ''}${vivo ? '&vivo=1' : ''}${volverMis ? '&volver=mis' : ''}`; };
 
   const original = parseTono(c.tono_original) ? c.tono_original : null;
   const menor = !!parseTono(original)?.menor;
@@ -901,7 +904,7 @@ async function vistaCancion(ctx) {
     const miInstr = st.perfil.instrumento;
     const misNotas = [notas.general?.contenido ? ['General', notas.general.contenido] : null,
       miInstr !== 'general' && notas[miInstr]?.contenido ? [NOTAS_TABS[miInstr], notas[miInstr].contenido] : null].filter(Boolean);
-    app.innerHTML = encabezado(c.titulo, { atras: setId ? `#/dia/${setId}` : '#/canciones', derecha }) + `
+    app.innerHTML = encabezado(c.titulo, { atras: volverMis ? '#/mis' : setId ? `#/dia/${setId}` : '#/canciones', derecha }) + `
       ${vivo ? `<button class="chip vivo ${st.seguirVivo ? 'activo' : ''}" data-acc="seguir" style="margin-bottom:10px">
         <span class="punto-vivo"></span>${st.seguirVivo ? (esAdmin() ? 'En vivo · tú controlas' : 'Siguiendo en vivo') : 'Libre · toca para volver al en vivo'}</button>` : ''}
       <div class="cancion-meta">${meta}</div>
@@ -1083,23 +1086,44 @@ async function vistaCancion(ctx) {
 
 // ---------- partituras ----------
 // ---------- editor de cifrado en compases ----------
+/** Semitonos entre dos tonos comparando su mayor relativa (Em → G = 0). */
+function semisEntre(desde, hasta) {
+  const a = parseTono(desde), b = parseTono(hasta);
+  if (!a || !b) return 0;
+  const ra = a.menor ? (a.idx + 3) % 12 : a.idx, rb = b.menor ? (b.idx + 3) % 12 : b.idx;
+  let d = (rb - ra + 12) % 12;
+  if (d > 6) d -= 12;
+  return d;
+}
+/** Transpone todos los acordes de un texto de cifrado. */
+function transponerTextoCifrado(txt, semis, bemoles) {
+  if (!semis) return txt;
+  return txt.split('\n').map(l => (/^\s*\*/.test(l) ? l
+    : l.replace(/<[^>]*>|[^\s{}\[\]|<>]+/g, t => (esAcorde(t) ? transponerAcorde(t, semis, bemoles) : t)))).join('\n');
+}
+
 function modalCifrado(c, alGuardar) {
   const inicial = c.cifrado || generarCifrado(c.letra);
+  const original = parseTono(c.tono_original) ? c.tono_original : null;
   const body = abrirModal('Cifrado en compases', `
     <form id="fCif">
-      <p class="ayuda" style="margin-top:0">Escribe en el tono original${c.tono_original ? ` (<b>${esc(tonoTxt(c.tono_original))}</b>)` : ''}; se transpone solo.</p>
-      <pre class="cf-ayuda">${esc(AYUDA_CIFRADO)}</pre>
+      <p class="ayuda" style="margin-top:0">Escribe en el tono original${original ? ` (<b>${esc(tonoTxt(original))}</b>)` : ''}; se transpone solo.</p>
+      <details class="cf-ayuda-d"><summary>Símbolos (estilo iReal Pro)</summary><pre class="cf-ayuda">${esc(AYUDA_CIFRADO)}</pre></details>
       <textarea name="cifrado" class="mono cf-editor" spellcheck="false" autocapitalize="off" autocomplete="off">${esc(inicial)}</textarea>
       <p class="ayuda" id="cfErr"></p>
       <div class="fila">
-        <button class="btn" type="button" id="bGenerar">⚡ Regenerar desde la letra</button>
-        ${c.cifrado ? '<button class="btn" type="button" id="bAuto">↺ Volver a automático</button>' : ''}
+        <button class="btn sm" type="button" id="bGenerar">⚡ Desde la letra</button>
+        <button class="btn sm" type="button" id="bIreal">📥 iReal Pro</button>
+        <button class="btn sm" type="button" id="bAudio">🎤 Desde audio</button>
+        ${c.cifrado ? '<button class="btn sm" type="button" id="bAuto">↺ Automático</button>' : ''}
       </div>
+      <input type="file" id="cfArchivo" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden>
+      <div id="cfExtra"></div>
       <div class="seccion-t">Vista previa</div>
       <div class="letra cf-wrap cf-previa" id="cfPrevia"></div>
       <button class="btn prim blk" type="submit">Guardar cifrado</button>
     </form>`);
-  const form = $('#fCif', body), ta = form.cifrado;
+  const form = $('#fCif', body), ta = form.cifrado, extra = $('#cfExtra', body);
   const previa = () => {
     const errs = erroresCifrado(ta.value);
     $('#cfErr', body).textContent = errs.length ? `⚠️ No reconozco: ${errs.join(', ')}` : '';
@@ -1107,10 +1131,109 @@ function modalCifrado(c, alGuardar) {
   };
   ta.oninput = previa;
   previa();
-  $('#bGenerar', body).onclick = () => {
-    if (ta.value.trim() && !confirm('¿Reemplazar lo escrito por un borrador nuevo desde la letra?')) return;
-    ta.value = generarCifrado(c.letra); previa();
+  let yaReemplazo = false;
+  const reemplazar = (txt, preguntar = true) => {
+    if (preguntar && !yaReemplazo && ta.value.trim() && ta.value.trim() !== txt.trim()
+      && !confirm('¿Reemplazar lo escrito por el cifrado nuevo?')) return false;
+    yaReemplazo = true; ta.value = txt; previa(); return true;
   };
+  const usarBpm = async bpm => {
+    const { error } = await sb.from('canciones').update({ bpm }).eq('id', c.id);
+    if (error) return fallo(error, 'BPM');
+    c.bpm = bpm; toast(`BPM guardado: ${bpm}`);
+  };
+  $('#bGenerar', body).onclick = () => { yaReemplazo = false; reemplazar(generarCifrado(c.letra)); };
+
+  // ---------- importar de iReal Pro ----------
+  $('#bIreal', body).onclick = () => {
+    extra.innerHTML = `<div class="card cf-extra">
+      <b>📥 Importar de iReal Pro</b>
+      <p class="ayuda">En iReal Pro: canción → compartir → <i>Exportar · iReal Pro</i> (o copia el link del foro). Pega aquí el link que empieza con <code>irealb://</code>.</p>
+      <textarea id="irLink" class="mono" rows="3" placeholder="irealb://…" spellcheck="false" autocapitalize="off"></textarea>
+      <div class="fila"><button type="button" class="btn sm prim" id="irLeer">Leer link</button></div>
+      <div id="irRes"></div></div>`;
+    const res = $('#irRes', extra);
+    $('#irLink', extra).focus();
+    $('#irLeer', extra).onclick = () => {
+      let canciones;
+      try { canciones = leerIreal($('#irLink', extra).value); } catch (e) { res.innerHTML = `<p class="ayuda" style="color:var(--peligro)">${esc(e.message)}</p>`; return; }
+      if (!canciones.length) { res.innerHTML = '<p class="ayuda" style="color:var(--peligro)">El link no trae canciones.</p>'; return; }
+      const aplicar = k => {
+        const x = canciones[k];
+        let txt = x.cifrado;
+        const semis = original && parseTono(x.tono) ? semisEntre(x.tono, original) : 0;
+        if (semis && confirm(`En iReal está en ${x.tono}; el tono original de esta canción es ${original}.\n¿Pasar el cifrado a ${original}?`))
+          txt = transponerTextoCifrado(txt, semis, usaBemoles(original));
+        yaReemplazo = false;
+        if (!reemplazar(txt)) return;
+        res.innerHTML = `<p class="ayuda">✅ Importada <b>${esc(x.titulo)}</b>${x.tono ? ` · tono ${esc(x.tono)}` : ''}${x.bpm ? ` · ${x.bpm} BPM` : ''}. Revisa la vista previa y guarda.</p>
+          ${x.bpm && x.bpm !== c.bpm ? `<button type="button" class="btn sm" id="irBpm">Usar ${x.bpm} BPM en la canción</button>` : ''}`;
+        const b = $('#irBpm', res); if (b) b.onclick = () => ocupado(b, () => usarBpm(x.bpm));
+      };
+      if (canciones.length === 1) return aplicar(0);
+      res.innerHTML = `<p class="ayuda">El link trae ${canciones.length} canciones. Elige una:</p>
+        <div class="lista">${canciones.map((x, k) => `<button type="button" class="item" data-k="${k}"><div class="info"><b>${esc(x.titulo)}</b><small>${esc([x.compositor, x.estilo, x.tono].filter(Boolean).join(' · '))}</small></div></button>`).join('')}</div>`;
+      res.onclick = e => { const b = e.target.closest('[data-k]'); if (b) aplicar(+b.dataset.k); };
+    };
+  };
+
+  // ---------- desde audio ----------
+  const archivo = $('#cfArchivo', body);
+  $('#bAudio', body).onclick = () => archivo.click();
+  archivo.onchange = async () => {
+    const file = archivo.files[0];
+    if (!file) return;
+    extra.innerHTML = `<div class="card cf-extra"><b>🎤 Analizando ${esc(file.name)}…</b>
+      <div class="cf-barra"><i id="auBarra"></i></div><p class="ayuda" id="auEstado">Leyendo el audio…</p></div>`;
+    let r;
+    try {
+      const { analizarArchivo, cifradoDesdeAnalisis } = await import('./audio-cifrado.js');
+      r = await analizarArchivo(file, p => {
+        const b = $('#auBarra', extra); if (b) b.style.width = Math.round(p * 100) + '%';
+        const e = $('#auEstado', extra); if (e) e.textContent = p < 0.56 ? 'Escuchando los acordes…' : p < 0.8 ? 'Buscando el pulso…' : 'Armando los compases…';
+      });
+      const op = { tempo: 1, desfase: null, dos: true, aOriginal: true };
+      yaReemplazo = false;
+      const pintarAudio = (primera = false) => {
+        const out = cifradoDesdeAnalisis(r, op);
+        op.desfase = out.desfase;
+        const semis = original ? semisEntre(out.tono, original) : 0;
+        const txt = op.aOriginal && semis ? transponerTextoCifrado(out.texto, semis, usaBemoles(original)) : out.texto;
+        if (!reemplazar(txt, primera)) { extra.innerHTML = ''; return; }
+        extra.innerHTML = `<div class="card cf-extra">
+          <b>🎤 Borrador desde audio</b>
+          <p class="ayuda">Tono detectado <b>${esc(out.tono)}</b> · <b>${out.bpm}</b> BPM · ${out.compases} compases. Es un borrador: escúchalo y corrige.</p>
+          ${semis ? `<label class="check"><input type="checkbox" id="auOrig" ${op.aOriginal ? 'checked' : ''}> Pasar al tono original (${esc(tonoTxt(original))})</label>` : ''}
+          <div class="fila">
+            <span class="ayuda" style="margin:0">Inicio del compás</span>
+            <button type="button" class="btn sm" data-au="desf" data-v="-1">◀</button><button type="button" class="btn sm" data-au="desf" data-v="1">▶</button>
+          </div>
+          <div class="fila">
+            <span class="ayuda" style="margin:0">Tempo</span>
+            ${[[0.5, 'Mitad'], [1, 'Detectado'], [2, 'Doble']].map(([v, t]) => `<button type="button" class="btn sm ${op.tempo === v ? 'prim' : ''}" data-au="tempo" data-v="${v}">${t}</button>`).join('')}
+          </div>
+          <div class="fila">
+            <button type="button" class="btn sm ${op.dos ? '' : 'prim'}" data-au="dos">${op.dos ? 'Solo 1 acorde por compás' : 'Permitir 2 acordes por compás'}</button>
+            ${out.bpm !== c.bpm ? `<button type="button" class="btn sm" data-au="bpm" data-v="${out.bpm}">Usar ${out.bpm} BPM en la canción</button>` : ''}
+          </div></div>`;
+      };
+      pintarAudio(true);
+      extra.onclick = e => {
+        const b = e.target.closest('[data-au]'); if (!b) return;
+        const a = b.dataset.au;
+        if (a === 'desf') op.desfase = (op.desfase + +b.dataset.v + 4) % 4;
+        else if (a === 'tempo') { op.tempo = +b.dataset.v; op.desfase = null; }
+        else if (a === 'dos') op.dos = !op.dos;
+        else if (a === 'bpm') return ocupado(b, () => usarBpm(+b.dataset.v));
+        pintarAudio();
+      };
+      extra.onchange = e => { if (e.target.id === 'auOrig') { op.aOriginal = e.target.checked; pintarAudio(); } };
+    } catch (e) {
+      console.error(e);
+      extra.innerHTML = `<p class="ayuda" style="color:var(--peligro)">No se pudo analizar ese archivo. Prueba con un mp3, m4a o wav.</p>`;
+    } finally { archivo.value = ''; }
+  };
+
   const guardar = async valor => {
     const { error } = await sb.from('canciones').update({ cifrado: valor }).eq('id', c.id);
     if (error) return fallo(error, 'Cifrado');
@@ -1483,7 +1606,7 @@ function filaDia(s, { ensayo = false } = {}) {
 function tarjetaPorConfirmar(asigs) {
   if (!asigs.length) return '';
   return `<div class="card confirmar">
-    <div style="font-weight:800;margin-bottom:6px">🙋 Te toca servir</div>
+    <div style="font-weight:800;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">🙋 Te toca servir <a href="#/mis" class="ayuda" style="margin:0;font-weight:600">Mis días ›</a></div>
     ${asigs.map(a => `
       <div class="conf-fila">
         <a href="#/dia/${a.setlist.id}" class="info"><b>${esc(tipoDe(a.setlist).emoji)} ${esc(a.setlist.titulo)}</b>
@@ -1497,6 +1620,7 @@ async function responderAsignacion(id, estado) {
   const { error } = await sb.from('asignaciones').update({ estado }).eq('id', id);
   if (error) return avisoV9(error) || fallo(error, 'Confirmación');
   toast(TOAST_ESTADO[estado]);
+  actualizarBadgeMis();
   rutear();
 }
 
@@ -2234,7 +2358,7 @@ async function vistaDia(ctx) {
       else if (acc === 'conf-mio') {
         const { error } = await sb.from('asignaciones').update({ estado: el.dataset.estado }).in('id', mios.map(a => a.id));
         if (error) { if (avisoV9(error)) return; throw error; }
-        toast(TOAST_ESTADO[el.dataset.estado]); rutear();
+        toast(TOAST_ESTADO[el.dataset.estado]); actualizarBadgeMis(); rutear();
       }
       else if (acc === 'recordar' || acc === 'recordar-uno') {
         const uno = acc === 'recordar-uno' ? el.dataset.perfil : null;
@@ -2268,6 +2392,153 @@ async function vistaDia(ctx) {
       }
     } catch (err) { fallo(err, 'Día'); }
   };
+}
+
+
+// =====================================================================
+// MIS DÍAS: lo que le toca a cada integrante, con todo listo para preparar
+// =====================================================================
+async function actualizarBadgeMis() {
+  try {
+    const pend = await misPendientes();
+    const n = new Set(pend.filter(a => a.estado === 'pendiente').map(a => a.setlist.id)).size;
+    const b = $('#badgeMis');
+    if (b) { b.hidden = !n; b.textContent = n > 9 ? '9+' : n; }
+  } catch {}
+}
+
+const linkPreparar = (s, it, i) => `#/cancion/${it.cancion_id}?set=${s.id}&i=${i}${it.tono ? '&tono=' + encodeURIComponent(it.tono) : ''}&volver=mis`;
+const rolMio = a => `${ICON_INSTR[a.rol] || '🎵'} ${ROLES[a.rol] || a.rol}${a.dirige ? ' · 👑 Dirige' : ''}`;
+function cuantoFalta(iso) {
+  const d = Math.round((new Date(new Date(iso).toDateString()) - new Date(new Date().toDateString())) / 86400e3);
+  return d === 0 ? 'Hoy' : d === 1 ? 'Mañana' : d < 0 ? '' : `En ${d} días`;
+}
+
+async function vistaMis(ctx) {
+  cargando('Mis días');
+  if (st.faltaV2) { app.innerHTML = encabezado('Mis días') + avisoV2(); return; }
+  const desde = isoSinMs(new Date(Date.now() - 45 * 86400e3));
+  const r = await conCache('mis-dias', sb.from('asignaciones')
+    .select(`${SEL_ASIG()}, setlist:setlists!inner(${selDia()}, setlist_items(${selItems()}))`)
+    .eq('perfil_id', st.uid).gte('setlist.fecha', desde));
+  if (!ctx.vigente()) return;
+  if (r.error) return fallo(r.error, 'Mis días');
+
+  // un día puede tener varias asignaciones mías (p. ej. Voz y Guitarra)
+  const dias = new Map();
+  for (const a of r.data || []) {
+    if (!a.setlist) continue;
+    const d = dias.get(a.setlist.id) || { s: a.setlist, mios: [] };
+    d.mios.push(a); dias.set(a.setlist.id, d);
+  }
+  const lista = [...dias.values()];
+  lista.forEach(d => { d.items = (d.s.setlist_items || []).filter(i => i.cancion).sort((a, b) => a.orden - b.orden); d.s.asignaciones ??= []; });
+  const corte = Date.now() - 12 * 3600e3;
+  const proximos = lista.filter(d => new Date(d.s.fecha) >= corte).sort((a, b) => a.s.fecha.localeCompare(b.s.fecha));
+  const pasados = lista.filter(d => new Date(d.s.fecha) < corte).sort((a, b) => b.s.fecha.localeCompare(a.s.fecha));
+
+  // lo que hay preparado para MI instrumento en cada canción
+  const miInstr = st.perfil.instrumento;
+  const ids = [...new Set(proximos.flatMap(d => d.items.map(i => i.cancion_id)))];
+  let notasMias = new Set(), partMias = new Set(), bpm = new Map();
+  if (ids.length) {
+    const [rn, rp, rb] = await Promise.all([
+      conCache('mis-notas', sb.from('notas_cancion').select('cancion_id, instrumento, contenido').in('cancion_id', ids).in('instrumento', ['general', miInstr])),
+      conCache('mis-part', sb.from('partituras').select('cancion_id').in('cancion_id', ids).eq('instrumento', miInstr)),
+      conCache('mis-bpm', sb.from('canciones').select('id, bpm').in('id', ids)),
+    ]);
+    if (!ctx.vigente()) return;
+    notasMias = new Set((rn.data || []).filter(n => n.contenido?.trim()).map(n => n.cancion_id));
+    partMias = new Set((rp.data || []).map(p => p.cancion_id));
+    if (!rb.error) bpm = new Map((rb.data || []).filter(c => c.bpm).map(c => [c.id, c.bpm]));
+  }
+
+  const porResponder = proximos.filter(d => d.mios.some(a => a.estado === 'pendiente')).length;
+  const tarjeta = d => {
+    const { s, mios, items } = d;
+    const t = tipoDe(s);
+    const estado = mios.every(a => a.estado === mios[0].estado) ? mios[0].estado : '';
+    const falta = cuantoFalta(s.fecha);
+    const companeros = s.asignaciones.filter(a => a.perfil_id !== st.uid && a.estado !== 'rechazado').sort(ordenAsig);
+    const misCanciones = items.filter(i => i.cantante_id === st.uid).length;
+    return `<article class="card mis-dia${falta === 'Hoy' ? ' hoy' : ''}" style="border-left:3px solid ${esc(t.color)}">
+      <div class="mis-cab">
+        <div class="fecha-box"><small>${new Date(s.fecha).toLocaleDateString('es-PA', { month: 'short' }).replace('.', '')}</small><b>${new Date(s.fecha).getDate()}</b></div>
+        <div class="info"><b>${esc(t.emoji)} ${esc(s.titulo)}</b>
+          <small style="text-transform:capitalize">${esc(fmtFechaLarga(s.fecha))} · ${esc(fmtHora(s.fecha))}</small>
+          ${s.ensayo_fecha ? `<small>🎹 Ensayo: ${esc(fmtCorta(s.ensayo_fecha))} · ${esc(fmtHora(s.ensayo_fecha))}</small>` : ''}
+          ${s.lugar ? `<small>📍 ${esc(s.lugar)}</small>` : ''}</div>
+        ${falta ? `<span class="tag ${falta === 'Hoy' || falta === 'Mañana' ? 'warn' : ''}">${falta}</span>` : ''}
+      </div>
+      <div class="mis-rol">Te toca: ${mios.map(a => `<b>${esc(rolMio(a))}</b>`).join(' + ')}${misCanciones ? ` · cantas ${misCanciones} canción${misCanciones > 1 ? 'es' : ''}` : ''}</div>
+      <div class="fila mis-conf">${botonesEstado('conf-mis', `data-ids="${mios.map(a => a.id).join(',')}"`, estado)}</div>
+      ${s.notas ? `<p class="post-texto mis-nota">${esc(s.notas)}</p>` : ''}
+      <div class="mis-rep">
+        <div class="mis-rep-t">🎵 Repertorio${items.length ? ` (${items.length})` : ''}</div>
+        ${items.length ? items.map((it, i) => `<a class="mis-can${it.cantante_id === st.uid ? ' mia' : ''}" href="${linkPreparar(s, it, i)}">
+            <span class="num">${i + 1}</span>
+            <span class="info"><b>${ICON_RITMO[ritmoDe(it)] ? ICON_RITMO[ritmoDe(it)] + ' ' : ''}${esc(it.cancion.titulo)}</b>
+              <small>${it.cantante_id === st.uid ? '🎤 La cantas tú' : it.cantante_id ? '🎤 ' + esc(nombreCorto(it.cantante_id)) : ''}${it.notas ? `${it.cantante_id ? ' · ' : ''}${esc(it.notas)}` : ''}</small></span>
+            <span class="mis-ind">${notasMias.has(it.cancion_id) ? '<span title="Hay nota para ti">📝</span>' : ''}${partMias.has(it.cancion_id) ? '<span title="Hay partitura de tu instrumento">📄</span>' : ''}${bpm.get(it.cancion_id) ? `<span class="mis-bpm">${bpm.get(it.cancion_id)}</span>` : ''}</span>
+            <span class="tono-pill">${esc(tonoTxt(it.tono || it.cancion.tono_original))}</span>
+          </a>`).join('') : '<p class="ayuda">Todavía no hay canciones para este día.</p>'}
+      </div>
+      <div class="fila">
+        ${items.length ? `<a class="btn prim" href="${linkPreparar(s, items[0], 0)}">▶ Preparar</a>` : ''}
+        <a class="btn" href="#/dia/${s.id}">Ver día y chat</a>
+        ${items.length ? `<button class="btn" data-acc="offline" data-id="${s.id}">⬇ Sin internet</button>` : ''}
+      </div>
+      ${companeros.length ? `<details class="mis-equipo"><summary>Sirven contigo (${new Set(companeros.map(a => a.perfil_id)).size})</summary>
+        <div>${companeros.map(a => `<span class="mis-comp ${a.estado}">${ICON_INSTR[a.rol] || '🎵'} ${esc(nombreCorto(a.perfil_id))}${a.dirige ? ' 👑' : ''} <small>${ICON_ESTADO[a.estado] || ''}</small></span>`).join('')}</div>
+      </details>` : ''}
+    </article>`;
+  };
+
+  app.innerHTML = encabezado('Mis días', { sub: proximos.length ? `${proximos.length} próximo${proximos.length > 1 ? 's' : ''}` : '' }) + `
+    ${porResponder ? `<div class="card aviso-mis">⏳ Tienes <b>${porResponder}</b> día${porResponder > 1 ? 's' : ''} por responder. Marca si puedes servir.</div>` : ''}
+    ${proximos.map(tarjeta).join('') || `<div class="vacio"><span class="grande">🙌</span>No tienes días asignados próximamente.<br><a href="#/agenda">Ver la agenda</a></div>`}
+    ${pasados.length ? `<details class="mis-pasados"><summary>Días anteriores (${pasados.length})</summary>
+      <div class="lista">${pasados.map(d => filaDia(d.s)).join('')}</div></details>` : ''}`;
+
+  app.onclick = async e => {
+    const el = e.target.closest('[data-acc]');
+    if (!el) return;
+    try {
+      if (el.dataset.acc === 'conf-mis') {
+        const { error } = await sb.from('asignaciones').update({ estado: el.dataset.estado }).in('id', el.dataset.ids.split(','));
+        if (error) { if (avisoV9(error)) return; throw error; }
+        toast(TOAST_ESTADO[el.dataset.estado]); actualizarBadgeMis(); rutear();
+      } else if (el.dataset.acc === 'offline') {
+        const d = dias.get(el.dataset.id);
+        await ocupado(el, () => guardarDiaOffline(d.s, d.items));
+      }
+    } catch (err) { fallo(err, 'Mis días'); }
+  };
+}
+
+/** Deja un día listo para abrir sin internet: sus canciones, notas, tonos y partituras. */
+async function guardarDiaOffline(s, items) {
+  if (!navigator.onLine) return toast('Necesitas internet para guardar', true);
+  const ids = [...new Set(items.map(i => i.cancion_id))];
+  await Promise.all([
+    conCache('dia:' + s.id, sb.from('setlists').select(selDia()).eq('id', s.id).maybeSingle()),
+    conCache('items:' + s.id, sb.from('setlist_items').select(selItems()).eq('setlist_id', s.id).order('orden')),
+  ]);
+  let archivos = [];
+  for (const id of ids) {
+    const [, , , rp] = await Promise.all([
+      conCache('cancion:' + id, sb.from('canciones').select('*').eq('id', id).maybeSingle()),
+      conCache('notas:' + id, sb.from('notas_cancion').select('*').eq('cancion_id', id)),
+      conCache('tonos:' + id, sb.from('tonos_cantante').select('*').eq('cancion_id', id)),
+      conCache('partituras:' + id, sb.from('partituras').select('*').eq('cancion_id', id).order('created_at')),
+    ]);
+    archivos.push(...(rp.data || []).filter(p => p.tipo !== 'link' && p.instrumento === st.perfil.instrumento));
+  }
+  try {
+    const cache = await caches.open('alabanza-archivos');
+    for (const p of archivos) { if (!(await cache.match(p.url))) { const r = await fetch(p.url); if (r.ok) await cache.put(p.url, r); } }
+  } catch {}
+  toast(`Listo: ${ids.length} canciones${archivos.length ? ` y ${archivos.length} partitura${archivos.length > 1 ? 's' : ''}` : ''} disponibles sin internet`);
 }
 
 // ---------- chat por evento ----------

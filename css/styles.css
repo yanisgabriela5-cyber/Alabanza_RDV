@@ -401,6 +401,32 @@ table.plan { border-collapse: collapse; font-size: 13px; min-width: 100%; }
 .cf-cal { font-size: .5em; vertical-align: -.05em; margin-left: .03em; }
 .cf-bajo { display: inline-block; font-size: .5em; position: relative; top: .55em; margin-left: .05em; color: var(--texto-2); }
 .cf-sim { font-size: 1.4em; color: var(--texto-2); }
+/* símbolos estilo iReal */
+.cf-comp { position: relative; }
+.cf-comp.izq-rep, .cf-comp.izq-doble { border-left-color: transparent; }
+.cf-bar { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+.cf-bar.izq { left: -2px; width: 6px; border-left: 4px solid var(--cf-linea); }
+.cf-bar.izq.doble { width: 6px; border-left: 2px solid var(--cf-linea); border-right: 1.5px solid var(--cf-linea); }
+.cf-bar.der { right: 0; width: 7px; border-right: 4px solid var(--cf-linea); border-left: 1.5px solid var(--cf-linea); }
+.cf-bar.der.doble { width: 5px; border-right-width: 2px; }
+.cf-bar.rep::after { content: ""; position: absolute; top: 50%; width: .22em; height: .75em; transform: translateY(-50%);
+  background: radial-gradient(circle, var(--cf-linea) 45%, transparent 52%) top / .22em .22em no-repeat, radial-gradient(circle, var(--cf-linea) 45%, transparent 52%) bottom / .22em .22em no-repeat; }
+.cf-bar.izq.rep { width: 4px; }
+.cf-bar.izq.rep::after { left: 3px; }
+.cf-bar.der.rep { width: 4px; border-left: 0; }
+.cf-bar.der.rep::after { right: 5px; }
+.cf-comp.izq-rep, .cf-comp.izq-doble { padding-left: .55em; }
+.cf-comp.der-rep, .cf-comp.der-doble, .cf-comp.der-fin { padding-right: .7em; }
+.cf-comp.casilla { border-top: 2px solid var(--cf-linea); padding-top: .55em; }
+.cf-casilla { position: absolute; top: .05em; left: .3em; font-size: .5em; font-weight: 700; color: var(--texto-2); }
+.cf-marca { position: absolute; top: -.05em; right: .3em; font-size: .7em; font-weight: 700; line-height: 1; color: var(--acento); }
+.cf-tsig { font-size: .55em; line-height: .95; font-weight: 800; text-align: center; color: var(--texto-2); margin-right: .1em; }
+.cf-texto { position: absolute; bottom: .05em; left: .3em; right: .3em; font-size: .45em; font-style: italic; color: var(--texto-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cf-nc { font-size: 1em; color: var(--texto-2); }
+.cf-pausa { font-weight: 400; color: var(--texto-2); }
+.cf-sim2 { font-size: 1.6em; }
+.cf-comp:has(.cf-sim) { justify-content: center; }
+
 .cf-ayuda { background: var(--bg-2); border-radius: 10px; padding: 8px 10px; font-size: 12px; color: var(--texto-2); overflow-x: auto; margin: 0 0 8px; }
 .cf-editor { min-height: 170px; font-size: 14px; white-space: pre; }
 .cf-previa { --fuente-letra: 15px; border: 1px solid var(--linea); border-radius: 10px; padding: 10px; margin-bottom: 12px; }
@@ -559,3 +585,45 @@ small.nd { display: block; color: var(--peligro); font-size: 11.5px; font-weight
 .bc-op b { display: block; font-size: 15px; }
 .bc-op small { color: var(--texto-2); font-size: 12px; }
 .bc-sel { cursor: default; border-color: var(--acento); }
+
+/* ---------- Mis días ---------- */
+.aviso-mis { border-left: 3px solid var(--acento); font-size: 14px; }
+.mis-dia { padding: 14px; }
+.mis-dia.hoy { box-shadow: 0 0 0 1px var(--acento); }
+.mis-cab { display: flex; gap: 12px; align-items: flex-start; }
+.mis-cab .info { flex: 1; min-width: 0; }
+.mis-cab .info b { display: block; font-size: 16px; }
+.mis-cab .info small { display: block; color: var(--texto-2); font-size: 13px; }
+.mis-rol { margin: 12px 0 8px; font-size: 14px; color: var(--texto-2); }
+.mis-rol b { color: var(--texto); }
+.mis-conf { margin: 0 0 10px; }
+.mis-nota { font-size: 14px; background: var(--bg-2); border-radius: 10px; padding: 8px 10px; margin: 0 0 10px; }
+.mis-rep { border-top: 1px solid var(--linea); margin-top: 4px; padding-top: 8px; }
+.mis-rep-t { font-size: 13px; font-weight: 700; color: var(--texto-2); margin-bottom: 4px; }
+.mis-can { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-radius: 8px; text-decoration: none; color: inherit; }
+.mis-can:hover { background: var(--card-2); }
+.mis-can + .mis-can { border-top: 1px solid var(--linea); }
+.mis-can .num { width: 20px; text-align: center; font-size: 13px; color: var(--texto-3); flex: none; }
+.mis-can .info { flex: 1; min-width: 0; }
+.mis-can .info b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mis-can .info small { display: block; font-size: 12px; color: var(--texto-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mis-can.mia .info small { color: var(--acento-2); font-weight: 600; }
+.mis-ind { display: flex; gap: 4px; align-items: center; font-size: 14px; flex: none; }
+.mis-bpm { font-size: 11px; color: var(--texto-3); border: 1px solid var(--linea); border-radius: 6px; padding: 0 4px; }
+.mis-equipo { margin-top: 10px; font-size: 14px; }
+.mis-equipo summary, .mis-pasados summary { cursor: pointer; color: var(--texto-2); font-weight: 600; }
+.mis-equipo > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mis-comp { background: var(--bg-2); border-radius: 8px; padding: 3px 8px; font-size: 13px; }
+.mis-comp.pendiente, .mis-comp.por_confirmar { opacity: .7; }
+.mis-pasados { margin: 18px 0; }
+.mis-pasados .lista { margin-top: 10px; }
+/* ---------- editor de cifrado: iReal y audio ---------- */
+.cf-ayuda-d { margin-bottom: 8px; }
+.cf-ayuda-d summary { cursor: pointer; font-size: 13px; color: var(--texto-2); margin-bottom: 6px; }
+.cf-extra { margin: 10px 0 0; padding: 12px; }
+.cf-extra textarea { width: 100%; margin-top: 6px; }
+.cf-extra .fila { align-items: center; margin-top: 8px; }
+.cf-barra { height: 6px; background: var(--card-2); border-radius: 99px; overflow: hidden; margin-top: 10px; }
+.cf-barra i { display: block; height: 100%; width: 0; background: var(--acento); transition: width .2s; }
+.nav a { min-width: 0; }
+.nav a span:last-child { white-space: nowrap; }

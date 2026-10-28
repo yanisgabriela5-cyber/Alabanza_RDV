@@ -61,7 +61,9 @@ No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
 5. **Editor de acordes:** botonera con los acordes del tono y modo "Tocar acordes" (tocar palabra → tocar acorde), sin escribir corchetes.
 6. **Partituras:** fotos/PDF/links por canción e instrumento (pensado para batería); filtro "Con partitura"; botón "Ver mi partitura" en la canción y en vivo.
 7. **Sin internet:** copia local de todo lo consultado + botón "Descargar para usar sin internet" en Mi perfil. Sin señal solo lectura.
-8. **Equipo:** integrantes por instrumento; aprobar, nombrar admin, desactivar.
+8. **Mis días:** pestaña con los días de cada uno, su rol, confirmación, repertorio con indicadores (nota, partitura, BPM), ▶ Preparar y guardar sin internet.
+9. **Cifrado iReal:** símbolos { } [ ] Z N1 N2 S Q f % x r n <texto> T34; importar links irealb:// (`js/cifrado.js` → `leerIreal`); borrador desde audio (`js/audio-cifrado.js`, se procesa en el celular).
+10. **Equipo:** integrantes por instrumento; aprobar, nombrar admin, desactivar.
 
 ## Pendientes / próximos pasos
 - [ ] Confirmar que se ejecutaron los scripts 002, 003, 004, 007 y 008, y ejecutar 009.

@@ -40,6 +40,15 @@ App web instalable (PWA) para el equipo de alabanza: muro, canciones con acordes
 | Crear/editar canciones y ensayos | — | — | ✅ |
 | Aprobar usuarios y asignar admins | — | — | ✅ |
 
+## Mis días
+Pestaña 🙋 **Mis días**: cada integrante ve sus próximos días con su asignación, botones para confirmar, el repertorio en el tono del día (📝 nota para su instrumento, 📄 partitura, BPM), con quién sirve y **▶ Preparar** para recorrer las canciones. **⬇ Sin internet** guarda ese día en el celular.
+
+## Cifrado (estilo iReal Pro)
+En la canción → 🎼 Cifrado → ✏️ Ajustar:
+- Símbolos: `{ }` repetición, `[ ]` doble barra, `Z` barra final, `N1`/`N2` casillas, `S` segno, `Q` coda, `f` calderón, `%` o `x` repite compás, `r` repite 2 compases, `n` N.C., `<texto>` indicaciones, `T34` cambio de compás.
+- **📥 iReal Pro**: pega un link `irealb://` y se convierte (y se pasa al tono original si hace falta).
+- **🎤 Desde audio**: borrador de acordes, tono y BPM detectados en el celular. Siempre hay que revisarlo.
+
 ## Letras con acordes
 - **Botonera de acordes:** en el editor aparecen los acordes del tono; se tocan para insertarlos donde está el cursor.
 - **Modo "Tocar acordes":** se toca la palabra y luego el acorde (‹ › lo mueve dentro de la palabra; tocar un acorde permite cambiarlo o quitarlo).
