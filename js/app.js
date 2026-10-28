@@ -889,7 +889,7 @@ async function vistaCancion(ctx) {
   const pintar = () => {
     const actual = tonoActual();
     const bem = actual ? usaBemoles(actual) : false;
-    const verCifrado = ajustes.vista === 'cifrado' && !!(c.letra || c.cifrado);
+    const verCifrado = ajustes.vista === 'cifrado' && !!(c.letra || c.cifrado || esAdmin());
     const meta = [
       c.artista ? `<span class="tag">${esc(c.artista)}</span>` : '',
       original ? `<span class="tag">Original: ${esc(tonoTxt(original))}</span>` : '',
@@ -922,6 +922,7 @@ async function vistaCancion(ctx) {
         <button class="btn-ico" data-acc="fuente-" aria-label="Letra más pequeña" style="font-size:13px">A−</button>
         <button class="btn-ico" data-acc="fuente+" aria-label="Letra más grande">A+</button>
       </div>
+      ${htmlMetro(c)}
       ${original ? `<div class="cantantes">
         <button class="chip ${semis === 0 ? 'activo' : ''}" data-acc="tono" data-tono="${esc(original)}">Original <b>${esc(tonoTxt(original))}</b></button>
         ${tonos.map(t => `<button class="chip ${parseTono(t.tono) && distancia(original, t.tono) === semis && semis !== 0 ? 'activo' : ''}" data-acc="tono" data-tono="${esc(t.tono)}" title="${esc(t.notas || '')}">${esc(nombreDe(t.cantante_id))} <b>${esc(tonoTxt(t.tono))}</b></button>`).join('')}
@@ -933,7 +934,7 @@ async function vistaCancion(ctx) {
       </div>` : ''}` : (esAdmin() ? `<p class="ayuda">Define el tono original (✏️) para poder guardar tonos por cantante.</p>` : '')}
       ${misNotas.map(([k, v]) => `<div class="card nota-mia"><b>📝 ${esc(k)}:</b> ${esc(v)}</div>`).join('')}
       ${partituras.some(p => p.instrumento === miInstr) ? `<button class="btn sm" style="margin-bottom:10px" data-acc="ver-part" data-instr="${esc(miInstr)}">📄 Ver mi partitura (${esc(INSTRUMENTOS[miInstr] || miInstr)})</button>` : ''}
-      ${c.letra || c.cifrado ? `<div class="segmentado vista-tg">
+      ${c.letra || c.cifrado || esAdmin() ? `<div class="segmentado vista-tg">
         <button data-acc="vista" data-v="letra" class="${verCifrado ? '' : 'activo'}">📝 Letra</button>
         <button data-acc="vista" data-v="cifrado" class="${verCifrado ? 'activo' : ''}">🎼 Cifrado</button>
         ${verCifrado && esAdmin() ? '<button data-acc="editar-cifrado">✏️ Ajustar</button>' : ''}
@@ -943,7 +944,7 @@ async function vistaCancion(ctx) {
         const grilla = texto ? renderCifrado(texto, { semis, bemoles: bem, latino: ajustes.latino }) : '';
         return `<div class="letra cf-wrap" style="--fuente-letra:${ajustes.fuente}px">
           <div class="cf-top"><span>${esc(c.compas || '4/4')}</span><b>${esc(c.titulo)}</b><span>${actual ? esc(tonoTxt(actual)) : ''}${c.bpm ? ` · ${c.bpm} bpm` : ''}</span></div>
-          ${grilla || '<div class="vacio">La letra no tiene acordes para armar el cifrado.</div>'}
+          ${grilla || `<div class="vacio">${c.letra ? 'La letra no tiene acordes para armar el cifrado.' : 'Esta canción aún no tiene cifrado.'}${esAdmin() ? '<br>Toca <b>✏️ Ajustar</b> para escribirlo, importarlo de iReal Pro o sacarlo de un audio.' : ''}</div>`}
           ${grilla && !c.cifrado ? `<p class="ayuda">Vista automática: 1 acorde = 1 compás.${esAdmin() ? ' Toca <b>✏️ Ajustar</b> para corregirla.' : ''}</p>` : ''}
         </div>`;
       })() : `<div class="letra ${ajustes.acordes ? '' : 'sin-acordes'}" style="--fuente-letra:${ajustes.fuente}px">
@@ -989,6 +990,8 @@ async function vistaCancion(ctx) {
       st.limpiar.push(() => nav.remove());
     }
   };
+  metroPreparar(c);
+  st.limpiar.push(metroParar);
   pintar();
 
   // ---- Modo en vivo ----
@@ -1035,6 +1038,7 @@ async function vistaCancion(ctx) {
     }
     else if (acc === 'vista') { ajustes.vista = el.dataset.v; guardarAjustes(); pintar(); }
     else if (acc === 'editar-cifrado') modalCifrado(c, () => pintar());
+    else if (acc.startsWith('met-')) metroAccion(acc, c, el);
     else if (acc === 'tab') { tabNota = el.dataset.tab; editandoNota = false; pintar(); }
     else if (acc === 'editar-nota') { editandoNota = true; pintar(); $('#txtNota')?.focus(); }
     else if (acc === 'cancelar-nota') { editandoNota = false; pintar(); }
@@ -1086,6 +1090,93 @@ async function vistaCancion(ctx) {
 
 // ---------- partituras ----------
 // ---------- editor de cifrado en compases ----------
+
+// =====================================================================
+// METRÓNOMO (Web Audio, programado con anticipación para que no se atrase)
+// =====================================================================
+const metro = { ctx: null, on: false, bpm: 80, tiempos: 4, prox: 0, n: 0, timer: null, cola: [], cancion: null };
+
+function metroPreparar(c) {
+  if (metro.cancion !== c.id) { metroParar(); metro.cancion = c.id; metro.bpm = c.bpm || 80; }
+  const num = parseInt(String(c.compas || '4/4').split('/')[0], 10);
+  metro.tiempos = num >= 2 && num <= 12 ? num : 4;
+}
+function htmlMetro(c) {
+  const luces = metro.tiempos <= 7 ? metro.tiempos : 1;
+  const guardar = esAdmin() && metro.bpm !== c.bpm;
+  return `<div class="metro${metro.on ? ' on' : ''}" id="metro">
+    <button class="btn-ico metro-play" data-acc="met-play" aria-label="${metro.on ? 'Detener metrónomo' : 'Iniciar metrónomo'}">${metro.on ? '■' : '🥁'}</button>
+    <button class="btn-ico" data-acc="met-menos" aria-label="Más lento">−</button>
+    <span class="metro-bpm"><b id="metBpm">${metro.bpm}</b><small>BPM${c.bpm ? '' : ' ?'}</small></span>
+    <button class="btn-ico" data-acc="met-mas" aria-label="Más rápido">+</button>
+    <span class="metro-luces" aria-hidden="true">${Array.from({ length: luces }, (_, i) => `<i data-t="${i}"></i>`).join('')}</span>
+    ${guardar ? `<button class="btn sm" data-acc="met-guardar">💾 ${c.bpm ? 'Guardar' : 'Guardar BPM'}</button>` : ''}
+  </div>`;
+}
+function metroGolpe(t, acento) {
+  const ctx = metro.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = acento ? 1700 : 1050;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(acento ? 0.7 : 0.4, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  o.connect(g).connect(ctx.destination);
+  o.start(t); o.stop(t + 0.06);
+}
+function metroProgramar() {
+  while (metro.prox < metro.ctx.currentTime + 0.12) {
+    const t = metro.n % metro.tiempos;
+    metroGolpe(metro.prox, t === 0);
+    metro.cola.push({ at: metro.prox, t });
+    metro.prox += 60 / metro.bpm; metro.n++;
+  }
+}
+function metroDibujar() {
+  if (!metro.on) return;
+  const ahora = metro.ctx.currentTime;
+  let ult = null;
+  while (metro.cola.length && metro.cola[0].at <= ahora) ult = metro.cola.shift();
+  if (ult) {
+    const luces = document.querySelectorAll('#metro .metro-luces i');
+    const k = luces.length === 1 ? 0 : ult.t;
+    luces.forEach((l, i) => l.classList.toggle('activo', i === k));
+    luces[k]?.classList.toggle('acento', ult.t === 0);
+  }
+  requestAnimationFrame(metroDibujar);
+}
+async function metroIniciar() {
+  metro.ctx ??= new (window.AudioContext || window.webkitAudioContext)();
+  await metro.ctx.resume();
+  metro.on = true; metro.n = 0; metro.cola = [];
+  metro.prox = metro.ctx.currentTime + 0.08;
+  metroProgramar();
+  metro.timer = setInterval(metroProgramar, 25);
+  try { metro.wake = await navigator.wakeLock?.request('screen'); } catch {}
+  requestAnimationFrame(metroDibujar);
+}
+function metroParar() {
+  if (!metro.on) return;
+  metro.on = false; clearInterval(metro.timer); metro.cola = [];
+  metro.wake?.release?.().catch(() => {}); metro.wake = null;
+  document.querySelectorAll('#metro .metro-luces i').forEach(l => l.classList.remove('activo', 'acento'));
+}
+async function metroAccion(acc, c, el) {
+  const repintar = () => { const m = $('#metro'); if (m) m.outerHTML = htmlMetro(c); };
+  if (acc === 'met-play') { metro.on ? metroParar() : await metroIniciar(); repintar(); }
+  else if (acc === 'met-menos' || acc === 'met-mas') {
+    metro.bpm = Math.min(240, Math.max(30, metro.bpm + (acc === 'met-mas' ? 1 : -1)));
+    const b = $('#metBpm'); if (b) b.textContent = metro.bpm;
+    clearTimeout(metro.tRep); metro.tRep = setTimeout(repintar, 600);   // mostrar 💾 al terminar de ajustar
+  }
+  else if (acc === 'met-guardar') {
+    await ocupado(el, async () => {
+      const { error } = await sb.from('canciones').update({ bpm: metro.bpm }).eq('id', c.id);
+      if (error) return fallo(error, 'BPM');
+      c.bpm = metro.bpm; toast(`BPM guardado: ${metro.bpm}`);
+    });
+    repintar();
+  }
+}
+
 /** Semitonos entre dos tonos comparando su mayor relativa (Em → G = 0). */
 function semisEntre(desde, hasta) {
   const a = parseTono(desde), b = parseTono(hasta);

@@ -627,3 +627,17 @@ small.nd { display: block; color: var(--peligro); font-size: 11.5px; font-weight
 .cf-barra i { display: block; height: 100%; width: 0; background: var(--acento); transition: width .2s; }
 .nav a { min-width: 0; }
 .nav a span:last-child { white-space: nowrap; }
+
+/* ---------- metrónomo ---------- */
+.metro { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--card); border: 1px solid var(--linea); border-radius: 12px; padding: 8px 10px; margin-bottom: 12px; }
+.metro.on { border-color: var(--acento); }
+.metro-play { font-size: 18px; }
+.metro.on .metro-play { background: var(--acento); color: var(--acento-txt); border-color: var(--acento); }
+.metro-bpm { display: flex; align-items: baseline; gap: 4px; min-width: 64px; justify-content: center; }
+.metro-bpm b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.metro-bpm small { font-size: 11px; color: var(--texto-3); }
+.metro-luces { display: flex; gap: 6px; flex: 1; justify-content: center; min-width: 60px; }
+.metro-luces i { width: 12px; height: 12px; border-radius: 50%; background: var(--card-2); border: 1px solid var(--linea); transition: background-color .08s; }
+.metro-luces i.activo { background: var(--acento-2); border-color: var(--acento-2); }
+.metro-luces i.activo.acento { background: var(--acento); border-color: var(--acento); transform: scale(1.25); }
+@media (prefers-reduced-motion: reduce) { .metro-luces i.activo.acento { transform: none; } }
