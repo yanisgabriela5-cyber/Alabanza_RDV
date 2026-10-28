@@ -13,6 +13,7 @@ App web instalable (PWA) para el equipo de alabanza: muro, canciones con acordes
    4. `supabase/004_voz_dirige_chat.sql`
    5. `supabase/007_menciones_push.sql`
    6. `supabase/008_push_avisos.sql` (antes, cambiar `CAMBIA_ESTE_SECRETO` por el valor de `PUSH_SECRET`; requiere la Edge Function `push` publicada)
+   7. `supabase/009_confirmaciones_recordatorios.sql`
 
    No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
 2. **GitHub Pages:** Settings → Pages → Source: *Deploy from a branch* → `main` / `(root)`.
@@ -68,7 +69,8 @@ Al cambiar archivos de la app, subir la versión de `CACHE` en `sw.js` para que 
 - **Tipos y horarios** (⚙️ en Agenda): día, hora y ensayo predeterminado de cada tipo (Estudio bíblico, Servicio dominical, etc.).
 - **Generar mes**: crea todos los días recurrentes del mes sin duplicar.
 - **Planificación**: tabla del mes con el equipo por rol; toca una celda para asignar.
-- **Confirmación**: cada integrante asignado marca ✅ Puedo / ❌ No puedo.
+- **Confirmación**: cada integrante asignado marca ✅ Puedo / 🤔 Por confirmar / ❌ No puedo.
+- **Recordatorios**: en el día, un admin ve cuántos faltan por responder y toca 🔔 Recordar (a todos o a una persona). Además sale un recordatorio automático 7, 3 y 1 día antes a las 9:00 am. Llegan como mención en el chat del día (@pendientes) con notificación push.
 - **Publicar en el muro**: publica el resumen del día (se actualiza solo si cambia).
 - **En vivo**: un admin inicia y cambia de canción; a todos les cambia la pantalla, en el tono asignado y con la nota de su instrumento.
 

@@ -36,11 +36,12 @@ begin
   where exists (select 1 from profiles p where p.id = m[1]::uuid and p.estado = 'aprobado')
   on conflict do nothing;
 
-  for g in select (regexp_matches(new.texto, '@\[(todos|voces|musicos|admins)\]\(grupo\)', 'g'))[1] loop
+  for g in select (regexp_matches(new.texto, '@\[(todos|voces|musicos|admins|pendientes)\]\(grupo\)', 'g'))[1] loop
     insert into menciones (mensaje_id, perfil_id)
     select distinct new.id, a.perfil_id from asignaciones a
     where a.setlist_id = new.setlist_id
-      and (g = 'todos' or (g = 'voces' and a.rol = 'voz') or (g = 'musicos' and a.rol <> 'voz'))
+      and (g = 'todos' or (g = 'voces' and a.rol = 'voz') or (g = 'musicos' and a.rol <> 'voz')
+           or (g = 'pendientes' and a.estado in ('pendiente','por_confirmar')))
     union
     select new.id, p.id from profiles p where g = 'admins' and p.rol = 'admin' and p.estado = 'aprobado'
     on conflict do nothing;

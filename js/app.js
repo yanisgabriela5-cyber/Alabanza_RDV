@@ -1269,7 +1269,24 @@ function modalTonos(c, tonos, alGuardar, preCantante) {
 // =====================================================================
 const DIAS_SEM = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const DIAS_INI = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
-const ICON_ESTADO = { confirmado: '✅', rechazado: '❌', pendiente: '⏳' };
+const ICON_ESTADO = { confirmado: '✅', por_confirmar: '🤔', rechazado: '❌', pendiente: '⏳' };
+const TXT_ESTADO = { confirmado: 'Puede', por_confirmar: 'Por confirmar', rechazado: 'No puede', pendiente: 'Sin responder' };
+const SIN_CONFIRMAR = ['pendiente', 'por_confirmar'];
+const TOAST_ESTADO = { confirmado: '¡Gracias! Confirmado ✅', por_confirmar: 'Anotado: por confirmar 🤔', rechazado: 'Avisamos que no puedes ❌' };
+/** Avisa si falta ejecutar 009 (estado nuevo o recordatorios). Devuelve true si era ese el error. */
+function avisoV9(error) {
+  const m = error?.message || '';
+  if (error?.code === '23514' || error?.code === 'PGRST202' || /asignaciones_estado_check|recordar_pendientes/.test(m)) {
+    toast(esAdmin() ? 'Ejecuta supabase/009_confirmaciones_recordatorios.sql en Supabase' : 'Esta opción aún no está activada', true);
+    return true;
+  }
+  return false;
+}
+/** Botones Puedo / Por confirmar / No puedo. actual = estado actual (para resaltar). */
+const botonesEstado = (acc, extra, actual, corto = false) => `
+  <button class="btn sm ${actual === 'confirmado' ? 'prim' : ''}" data-acc="${acc}" ${extra} data-estado="confirmado">✅${corto ? '' : ' Puedo'}</button>
+  <button class="btn sm ${actual === 'por_confirmar' ? 'aviso' : ''}" data-acc="${acc}" ${extra} data-estado="por_confirmar" title="Por confirmar">🤔${corto ? '' : ' Por confirmar'}</button>
+  <button class="btn sm ${actual === 'rechazado' ? 'peligro' : ''}" data-acc="${acc}" ${extra} data-estado="rechazado" title="No puedo">❌${corto ? '' : ' No puedo'}</button>`;
 const SEL_ASIG = () => (st.faltaV4 ? 'id, perfil_id, rol, estado' : 'id, perfil_id, rol, estado, dirige');
 const selDia = () => `*, asignaciones(${SEL_ASIG()})`;
 const SEL_ITEMS_BASE = '*, cancion:canciones(id, titulo, artista, tono_original)';
@@ -1447,6 +1464,7 @@ function etiquetaMia(s) {
   const mios = misRoles(s);
   if (!mios.length) return '';
   if (mios.some(a => a.estado === 'pendiente')) return '<span class="tag warn">Te toca · confirma</span>';
+  if (mios.some(a => a.estado === 'por_confirmar')) return '<span class="tag warn">🤔 Por confirmar</span>';
   if (mios.every(a => a.estado === 'rechazado')) return '<span class="tag">No puedes</span>';
   return '<span class="tag ok">Te toca ✅</span>';
 }
@@ -1470,16 +1488,15 @@ function tarjetaPorConfirmar(asigs) {
       <div class="conf-fila">
         <a href="#/dia/${a.setlist.id}" class="info"><b>${esc(tipoDe(a.setlist).emoji)} ${esc(a.setlist.titulo)}</b>
           <small>${fmtCorta(a.setlist.fecha)} · ${fmtHora(a.setlist.fecha)} · ${esc(etiquetaRol(a))}</small></a>
-        <button class="btn sm prim" data-acc="conf" data-id="${a.id}" data-estado="confirmado">✅ Puedo</button>
-        <button class="btn sm" data-acc="conf" data-id="${a.id}" data-estado="rechazado">❌</button>
+        ${botonesEstado('conf', `data-id="${a.id}"`, a.estado, true)}
       </div>`).join('')}
   </div>`;
 }
 
 async function responderAsignacion(id, estado) {
   const { error } = await sb.from('asignaciones').update({ estado }).eq('id', id);
-  if (error) return fallo(error, 'Confirmación');
-  toast(estado === 'confirmado' ? '¡Gracias! Confirmado ✅' : 'Avisamos que no puedes ❌');
+  if (error) return avisoV9(error) || fallo(error, 'Confirmación');
+  toast(TOAST_ESTADO[estado]);
   rutear();
 }
 
@@ -1487,7 +1504,7 @@ async function misPendientes() {
   if (st.faltaV2) return [];
   const { data } = await conCache('pendientes', sb.from('asignaciones')
     .select(`${SEL_ASIG()}, setlist:setlists(id, titulo, fecha, tipo_evento_id, tipo)`)
-    .eq('perfil_id', st.uid).eq('estado', 'pendiente'));
+    .eq('perfil_id', st.uid).in('estado', SIN_CONFIRMAR));
   const limite = Date.now() - 12 * 3600e3;
   return (data || []).filter(a => a.setlist && new Date(a.setlist.fecha) >= limite)
     .sort((a, b) => a.setlist.fecha.localeCompare(b.setlist.fecha));
@@ -1902,11 +1919,11 @@ async function vistaPlan(ctx) {
           ${cols.map(c => {
             const as = s.asignaciones.filter(a => a.rol === c);
             return `<td class="${esAdmin() ? 'editable' : ''}" data-acc="celda" data-id="${s.id}" data-rol="${c}">${as.map(a =>
-              `<span class="p ${a.estado}${ndDia(s).some(i => i.perfil_id === a.perfil_id) ? ' choque' : ''}" title="${a.estado}${a.dirige ? ' · dirige' : ''}">${a.dirige ? '👑 ' : ''}${esc(nombreCorto(a.perfil_id))}</span>`).join('') || '<span class="vacio-c">—</span>'}</td>`;
+              `<span class="p ${a.estado}${ndDia(s).some(i => i.perfil_id === a.perfil_id) ? ' choque' : ''}" title="${TXT_ESTADO[a.estado] || a.estado}${a.dirige ? ' · dirige' : ''}">${a.dirige ? '👑 ' : ''}${esc(nombreCorto(a.perfil_id))}</span>`).join('') || '<span class="vacio-c">—</span>'}</td>`;
           }).join('')}
           <td>${s.setlist_items.length || '—'}</td></tr>`;
       }).join('')}</tbody></table></div>
-      <p class="ayuda">👑 dirige · ✅ confirmado · ⏳ <span class="p pendiente" style="padding:0 4px">pendiente</span> · <span class="p rechazado" style="padding:0 4px">no puede</span>${esAdmin() ? ' · Toca una celda para asignar.' : ''}</p>`
+      <p class="ayuda">👑 dirige · ✅ confirmado · ⏳ <span class="p pendiente" style="padding:0 4px">sin responder</span> · <span class="p por_confirmar" style="padding:0 4px">🤔 por confirmar</span> · <span class="p rechazado" style="padding:0 4px">no puede</span>${esAdmin() ? ' · Toca una celda para asignar.' : ''}</p>`
       : `<div class="vacio"><span class="grande">📋</span>No hay días este mes.${esAdmin() ? '<br>Usa <b>Generar mes</b> en la Agenda.' : ''}</div>`}
     ${data.length ? `<div class="seccion-t">Participación del mes</div>
       <div class="card" style="font-size:14px">${[...conteo.entries()].sort((a, b) => b[1] - a[1]).map(([id, n]) => `${esc(nombreDe(id))} <b>${n}</b>`).join(' · ') || 'Nadie asignado aún.'}
@@ -2096,12 +2113,22 @@ async function vistaDia(ctx) {
   const vivo = rv.data?.activo ? rv.data : null;
   const t = tipoDe(s);
   const mios = misRoles(s);
+  const estadoMio = mios.every(a => a.estado === mios[0]?.estado) ? mios[0]?.estado : '';
+  const personas = est => new Set(s.asignaciones.filter(a => a.estado === est).map(a => a.perfil_id)).size;
+  const nSinResp = personas('pendiente'), nPorConf = personas('por_confirmar');
+  const aRecordar = new Set(s.asignaciones.filter(a => SIN_CONFIRMAR.includes(a.estado) && a.perfil_id !== st.uid).map(a => a.perfil_id)).size;
+  const resumenConf = esAdmin() && s.asignaciones.length && !st.faltaV2 ? `<div class="card resumen-conf">
+      <div class="info">${nSinResp || nPorConf
+        ? `${nSinResp ? `⏳ <b>${nSinResp}</b> sin responder` : ''}${nSinResp && nPorConf ? ' · ' : ''}${nPorConf ? `🤔 <b>${nPorConf}</b> por confirmar` : ''}`
+        : '✅ Todo el equipo respondió'}</div>
+      ${aRecordar && !st.faltaV7 ? `<button class="btn sm" data-acc="recordar">🔔 Recordar (${aRecordar})</button>` : ''}
+    </div>` : '';
 
   const grupo = (titulo, roles) => {
     const as = s.asignaciones.filter(a => roles.includes(a.rol)).sort(ordenAsig);
     return `<div class="seccion-t">${titulo}</div>` + (as.length
       ? `<div class="card equipo-dia">${as.map(a => `<div class="eq-fila ${a.estado}">
-          <span class="eq-rol">${esc(etiquetaRol(a))}</span><b>${esc(nombreDe(a.perfil_id))}</b><span title="${a.estado}">${ICON_ESTADO[a.estado]}</span></div>`).join('')}</div>`
+          <span class="eq-rol">${esc(etiquetaRol(a))}</span><b>${esc(nombreDe(a.perfil_id))}</b><span title="${TXT_ESTADO[a.estado] || a.estado}">${ICON_ESTADO[a.estado] || ''}</span>${esAdmin() && SIN_CONFIRMAR.includes(a.estado) && a.perfil_id !== st.uid && !st.faltaV7 ? `<button class="eq-rec" data-acc="recordar-uno" data-perfil="${a.perfil_id}" title="Enviar recordatorio" aria-label="Enviar recordatorio">🔔</button>` : ''}</div>`).join('')}</div>`
       : '<p class="ayuda">Sin asignar.</p>');
   };
 
@@ -2116,14 +2143,12 @@ async function vistaDia(ctx) {
     </div>
     ${mios.length ? `<div class="card confirmar">
       <div><b>🙋 Te toca:</b> ${mios.map(a => esc(etiquetaRol(a))).join(', ')}</div>
-      <div class="fila" style="margin-top:10px">
-        <button class="btn ${mios.every(a => a.estado === 'confirmado') ? 'prim' : ''}" data-acc="conf-mio" data-estado="confirmado">✅ Puedo</button>
-        <button class="btn ${mios.every(a => a.estado === 'rechazado') ? 'peligro' : ''}" data-acc="conf-mio" data-estado="rechazado">❌ No puedo</button>
-      </div></div>` : ''}
+      <div class="fila" style="margin-top:10px">${botonesEstado('conf-mio', '', estadoMio)}</div></div>` : ''}
     ${vivo ? `<div class="card vivo-banner"><span class="punto-vivo"></span><div class="info"><b>En vivo ahora</b><small>Canción ${vivo.indice + 1} de ${items.length}</small></div>
         <button class="btn prim sm" data-acc="vivo-unirse">Unirme</button>
         ${esAdmin() ? '<button class="btn sm" data-acc="vivo-fin">Terminar</button>' : ''}</div>`
       : esAdmin() && items.length && !st.faltaV2 ? `<button class="btn blk" data-acc="vivo-iniciar" style="margin:0 0 12px">🔴 Iniciar en vivo</button>` : ''}
+    ${resumenConf}
     ${st.faltaV2 ? '' : `${grupo('🎤 Cantores', ROLES_CANTO)}
       ${grupo('🎸 Instrumentistas', Object.keys(ROLES).filter(r => !ROLES_CANTO.includes(r)))}
       ${esAdmin() ? '<button class="btn sm" data-acc="asignar">👥 Asignar equipo</button>' : ''}`}
@@ -2208,8 +2233,19 @@ async function vistaDia(ctx) {
       else if (acc === 'publicar') modalPublicarDia(s);
       else if (acc === 'conf-mio') {
         const { error } = await sb.from('asignaciones').update({ estado: el.dataset.estado }).in('id', mios.map(a => a.id));
-        if (error) throw error;
-        toast(el.dataset.estado === 'confirmado' ? '¡Gracias! Confirmado ✅' : 'Avisamos que no puedes ❌'); rutear();
+        if (error) { if (avisoV9(error)) return; throw error; }
+        toast(TOAST_ESTADO[el.dataset.estado]); rutear();
+      }
+      else if (acc === 'recordar' || acc === 'recordar-uno') {
+        const uno = acc === 'recordar-uno' ? el.dataset.perfil : null;
+        const quien = uno ? nombreDe(uno) : `${aRecordar} persona${aRecordar === 1 ? '' : 's'} sin confirmar`;
+        if (!confirm(`¿Enviar recordatorio a ${quien}?\nLes llega una notificación y queda escrito en el chat del día.`)) return;
+        el.disabled = true;
+        const { data, error } = await sb.rpc('recordar_pendientes', { p_setlist: s.id, p_perfil: uno });
+        el.disabled = false;
+        if (error) { if (avisoV9(error)) return; throw error; }
+        toast(data ? `Recordatorio enviado 🔔 (${data})` : 'No hay nadie pendiente');
+        rutear();
       }
       else if (acc === 'vivo-iniciar') {
         const { error } = await sb.from('en_vivo').upsert({
@@ -2858,7 +2894,7 @@ async function modalTonosDe(perfilId, alCambiar = () => {}, tonoSel = null) {
 // MENCIONES
 // =====================================================================
 const RX_MEN = /@\[([^\]]+)\]\((grupo|[0-9a-f-]{36})\)/g;
-const GRUPOS_MEN = { todos: 'Todos los del día', voces: 'Voces del día', musicos: 'Músicos del día', admins: 'Administradores' };
+const GRUPOS_MEN = { todos: 'Todos los del día', voces: 'Voces del día', musicos: 'Músicos del día', admins: 'Administradores', pendientes: 'Sin confirmar del día' };
 
 function enGrupo(g, s) {
   if (g === 'admins') return esAdmin();
@@ -2866,6 +2902,7 @@ function enGrupo(g, s) {
   if (g === 'todos') return mias.length > 0;
   if (g === 'voces') return mias.some(a => a.rol === 'voz');
   if (g === 'musicos') return mias.some(a => a.rol !== 'voz');
+  if (g === 'pendientes') return mias.some(a => SIN_CONFIRMAR.includes(a.estado));
   return false;
 }
 const esParaMi = (n, id, s) => id === st.uid || (id === 'grupo' && enGrupo(n, s));

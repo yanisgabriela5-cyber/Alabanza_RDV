@@ -30,6 +30,8 @@ Costo: **$0** (GitHub Pages + plan gratis de Supabase).
 5. `007_menciones_push.sql` ⏳ **confirmar si se ejecutó**: menciones en el chat, indisponibilidad por fechas, historial de canciones, metrónomo, suscripciones push.
 6. `008_push_avisos.sql` ⏳ **confirmar si se ejecutó**: disparadores de push (requiere la Edge Function `push` y el secreto `PUSH_SECRET`).
 
+7. `009_confirmaciones_recordatorios.sql` ⏳ **ejecutar**: estado Por confirmar, grupo @pendientes, recordatorio manual (`recordar_pendientes`) y automático (cron `recordar-confirmacion`, 9:00 am, a 7/3/1 días).
+
 No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
 
 ## Permisos
@@ -52,7 +54,7 @@ No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
      - 🎹 Ensayo.
    - **Generar mes:** crea automáticamente los días recurrentes.
    - **Planificación:** tabla del mes por rol, con conteo de participación.
-   - **Equipo del día:** cantores (rol único **Voz**, con marca 👑 **Dirige** por día) e instrumentistas; cada uno confirma ✅ / ❌.
+   - **Equipo del día:** cantores (rol único **Voz**, con marca 👑 **Dirige** por día) e instrumentistas; cada uno marca ✅ Puedo / 🤔 Por confirmar / ❌ No puedo. El admin ve el resumen y envía recordatorios 🔔 (manuales o automáticos).
    - **Chat del día:** conversación en tiempo real dentro de cada evento.
    - **Publicar en el muro** y **compartir por WhatsApp.**
 4. **Modo en vivo:** un admin inicia desde el día y, al cambiar de canción, a todos les cambia la pantalla en el tono asignado. Cada uno ve arriba la nota general y la de su instrumento. Se puede pasar a modo "Libre".
@@ -62,7 +64,7 @@ No existen 005 ni 006. Todos se pueden volver a ejecutar sin borrar datos.
 8. **Equipo:** integrantes por instrumento; aprobar, nombrar admin, desactivar.
 
 ## Pendientes / próximos pasos
-- [ ] Confirmar que se ejecutaron los scripts 002, 003, 004, 007 y 008.
+- [ ] Confirmar que se ejecutaron los scripts 002, 003, 004, 007 y 008, y ejecutar 009.
 - [ ] Subir al repo el código de la Edge Function `push` (sin secretos) para no depender solo de Supabase.
 - [ ] Desactivar "Confirm email" en Supabase (Authentication → Sign In / Providers → Email) por el límite de correos.
 - [ ] Configurar en Supabase → Authentication → URL Configuration: Site URL y Redirect URL = `https://yanisgabriela5-cyber.github.io/Alabanza_RDV/`
